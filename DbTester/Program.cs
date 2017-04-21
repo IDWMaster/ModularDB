@@ -4,10 +4,13 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace AzureDB
+namespace DbTester
 {
-    public class AzureDB
+    class Program
     {
-
+        static void Main(string[] args)
+        {
+            
+        }
     }
 }
