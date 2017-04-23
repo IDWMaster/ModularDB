@@ -59,6 +59,7 @@ namespace AzureDB
                         ops = pendingOperations;
                         pendingOperations = new Dictionary<ulong, List<AzureOperationHandle>>();
                     }
+
                     List<Task> runningTasks = new List<Task>();
                     foreach(var shard in ops)
                     {
@@ -82,6 +83,7 @@ namespace AzureDB
                     ops.SelectMany(m => m.Value).AsParallel().ForAll(m => m.Task.SetResult(m.Entity));
                 }
             });
+            mthread.Name = "AzureDB-webrunner";
             mthread.Start();
         }
 
