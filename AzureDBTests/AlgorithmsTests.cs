@@ -14,38 +14,37 @@ namespace AzureDB.Tests
         [TestMethod()]
         public unsafe void HashTest()
         {
-            //Test hash ordering
-            byte[] a = new byte[1];
-            byte[] b = new byte[] { 1 };
-            Assert.IsTrue(a.Hash() < b.Hash());
-            Assert.IsTrue(new byte[] { 1, 0,0,0 }.Hash() > new byte[] { 0,0,0,1 }.Hash());
-            Assert.IsTrue(new byte[] { 1, 0, 0, 0 }.Hash() > new byte[] { 0, 0, 1 }.Hash());
-            Assert.IsTrue(new byte[] { 1 }.Hash() > new byte[] { 0, 0, 1 }.Hash());
-            Assert.IsTrue(new byte[] { 2 }.Hash() > new byte[] { 1 }.Hash());
-            Assert.IsTrue(new byte[] { 50 }.Hash() > new byte[] { 0,0,120 }.Hash());
-            Assert.IsTrue(new byte[] { 120 }.Hash() > new byte[] { 0, 0, 120 }.Hash());
-
             // Test hash uniqueness (sorted list)
             ulong[] hashes = new ulong[255];
-            int[] partitions = new int[5];
-            for (int i = 0;i<255;i++)
+            int[] partitions = new int[16];
+            for (int i = 0; i < 255; i++)
             {
-                partitions[new byte[] { (byte)i }.Hash() % 5]++;
+                partitions[new byte[] { (byte)i }.Hash() % (ulong)(partitions.Length)]++;
             }
             int average = (int)partitions.Average();
-            Assert.IsFalse(partitions.Where(m=>Math.Abs(average-m)>partitions.Length).Any());
+            Assert.IsFalse(partitions.Where(m => Math.Abs(average - m) > partitions.Length).Any());
 
             //Test it with a pseudo-random dataset
-            Random mrand = new Random(5);
-            for(int i = 0;i<65536;i++)
+            Random mrand = new Random();
+            for (int i = 0; i < 65536; i++)
             {
                 int eger = mrand.Next();
                 byte* ptr = (byte*)&eger;
-                partitions[Algorithms.Hash(ptr, sizeof(int)) % 5]++;
+                partitions[Algorithms.Hash(ptr, sizeof(int)) % (ulong)partitions.Length]++;
             }
             average = (int)partitions.Average();
-            Assert.IsFalse(partitions.Where(m => Math.Abs(average - m) > partitions.Length).Count()<(partitions.Length/2));
+            Assert.IsFalse(partitions.Where(m => Math.Abs(average - m) > partitions.Length).Count() < (partitions.Length / 2));
 
+
+        }
+
+        [TestMethod()]
+        public void LinearHashTest()
+        {
+            Assert.IsTrue(new byte[] { 1, 0 }.LinearHash() < new byte[] { 2, 0 }.LinearHash());
+            Assert.IsTrue(new byte[] { 1, 0 }.LinearHash() < new byte[] { 2, 0, 255, 255, 255, 255 }.LinearHash());
+            Assert.IsTrue(new byte[] { 0, 2 }.LinearHash() < new byte[] { 2, 0 }.LinearHash());
+            Assert.IsTrue(new byte[] {  255, 0 }.LinearHash() > new byte[] { 0, 255 }.LinearHash());
         }
     }
 }

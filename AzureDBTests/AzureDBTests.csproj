@@ -57,6 +57,7 @@
   <ItemGroup>
     <Compile Include="AlgorithmsTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="ScalableDbTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\AzureDB\AzureDB.csproj">
