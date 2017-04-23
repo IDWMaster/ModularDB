@@ -119,7 +119,7 @@ namespace AzureDB
 
                 evt.Set();
             }
-            await Task.WhenAny(ops.Select(m => m.Task.Task));
+            await Task.WhenAll(ops.Select(m => m.Task.Task));
         }
     }
 }
