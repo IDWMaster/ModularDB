@@ -6,18 +6,7 @@ using System.Threading.Tasks;
 
 namespace AzureDB
 {
-    class ByteComparer : IEqualityComparer<byte[]>
-    {
-        public bool Equals(byte[] x, byte[] y)
-        {
-            return x.SequenceEqual(y);
-        }
-
-        public int GetHashCode(byte[] obj)
-        {
-            return (int)obj.Hash();
-        }
-    }
+    
 
     /// <summary>
     /// A database stored in local RAM
@@ -32,7 +21,31 @@ namespace AzureDB
         public override Task<ulong> GetShardCount()
         {
             TaskCompletionSource<ulong> src = new TaskCompletionSource<ulong>();
-            src.SetResult(ulong.MaxValue);
+            src.SetResult(1);
+            return src.Task;
+        }
+
+        protected override Task RetrieveEntities(IEnumerable<ScalableEntity> entities, RetrieveCallback cb)
+        {
+            TaskCompletionSource<bool> src = new TaskCompletionSource<bool>();
+
+            List<ScalableEntity> retval = new List<ScalableEntity>();
+            lock (db)
+            {
+                foreach (var iable in entities)
+                {
+                    if(db.ContainsKey(iable.Key))
+                    {
+                        iable.Value = db[iable.Key];
+                        retval.Add(iable);
+                    }
+                }
+            }
+            if(retval.Any())
+            {
+                cb(retval);
+            }
+            src.SetResult(true);
             return src.Task;
         }
 

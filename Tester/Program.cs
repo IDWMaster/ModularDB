@@ -23,13 +23,21 @@ namespace Tester
         }
         static async Task prog_main()
         {
-            using (ScaledAzureDb db = new ScaledAzureDb(File.ReadAllLines("C:\\data\\config.txt").Select(m=>new AzureDatabase(m,"testabletables")).ToList().ToArray()))
+            using (ScalableDb db = new ScaledAzureDb(File.ReadAllLines("C:\\data\\config.txt").Select(m=>new AzureDatabase(m,"testabletables")).ToList().ToArray()))
             {
-                Stopwatch mwatch = new Stopwatch();
-                mwatch.Start();
-                await db.Upsert(GenerateEntities().Take(100000));
-                mwatch.Stop();
-                Console.WriteLine("Upsert took " + mwatch.Elapsed);
+                ScalableDb mdb = db;
+               // mdb = new MemoryDb();
+                while (true)
+                {
+                    Console.WriteLine("Enter number of entities to test");
+                    int count = int.Parse(Console.ReadLine());
+                    var entities = GenerateEntities().Take(count).ToList();
+                    Stopwatch mwatch = new Stopwatch();
+                    mwatch.Start();
+                    await mdb.Upsert(entities);
+                    mwatch.Stop();
+                    Console.WriteLine("Upsert took " + mwatch.Elapsed);
+                }
             }
             
         }

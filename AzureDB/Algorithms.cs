@@ -6,6 +6,45 @@ using System.Threading.Tasks;
 
 namespace AzureDB
 {
+    public class ByteComparer : IEqualityComparer<byte[]>
+    {
+       public static ByteComparer instance = new ByteComparer();
+        public bool Equals(byte[] x, byte[] y)
+        {
+            int len = x.Length;
+            if(x.Length != y.Length)
+            {
+                return false;
+            }
+            for(int i = 0;i<len;i++)
+            {
+                if(x[i] != y[i])
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        public int GetHashCode(byte[] obj)
+        {
+            return (int)obj.Hash();
+        }
+    }
+    public class EntityComparer : IEqualityComparer<ScalableEntity>
+    {
+        public static EntityComparer instance = new EntityComparer();
+        public bool Equals(ScalableEntity x, ScalableEntity y)
+        {
+           return ByteComparer.instance.Equals(x.Key, y.Key);
+        }
+
+        public int GetHashCode(ScalableEntity obj)
+        {
+            return (int)obj.Key.Hash();
+        }
+    }
+
     public static class Algorithms
     {
         public static ulong LinearHash(this byte[] array)

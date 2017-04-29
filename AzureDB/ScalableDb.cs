@@ -28,10 +28,46 @@ namespace AzureDB
         //Database design for scalable architecture
         // Assumptions -- PartitionKey == server ID which == hash(key), RowKey == key
         // Secondary (optional) range indices -- PartitionKey == First N bits of key where N is the number of desired partitions
-        
+
+        public delegate bool RetrieveCallback(IEnumerable<ScalableEntity> entities);
+
         public ScalableDb()
         {
             
+        }
+
+
+        public async Task Retrieve(IEnumerable<byte[]> keys, RetrieveCallback cb)
+        {
+            var shardCount = await GetShardCount();
+            var servers = await GetShardServers();
+
+            if (servers == null)
+            {
+                await RetrieveEntities(keys.Select(m => new ScalableEntity(m, null).SetPartition(shardCount)), cb);
+            }
+            else
+            {
+                bool running = true;
+                var shards = keys.Select(m => new ScalableEntity(m, null).SetPartition(shardCount)).ToLookup(m => m.Partition);
+                List<Task> pending = new List<Task>();
+                foreach (var shard in shards)
+                {
+                    pending.Add(servers[shard.Key].RetrieveEntities(shard,m=> {
+                        if(!running)
+                        {
+                            return false;
+                        }
+                        if (!cb(m))
+                        {
+                            running = false;
+                            return false;
+                        }
+                        return true;
+                    }));
+                }
+                await Task.WhenAll(pending);
+            }
         }
 
 
@@ -59,6 +95,7 @@ namespace AzureDB
             }
         }
 
+        protected abstract Task RetrieveEntities(IEnumerable<ScalableEntity> entities, RetrieveCallback cb);
         protected abstract Task UpsertEntities(IEnumerable<ScalableEntity> entities);
         
         /// <summary>
