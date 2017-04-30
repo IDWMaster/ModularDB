@@ -26,7 +26,7 @@ namespace Tester
             using (ScalableDb db = new ScaledAzureDb(File.ReadAllLines("C:\\data\\config.txt").Select(m=>new AzureDatabase(m,"testabletables")).ToList().ToArray()))
             {
                 ScalableDb mdb = db;
-               // mdb = new MemoryDb();
+                //mdb = new MemoryDb();
                 while (true)
                 {
                     Console.WriteLine("Enter number of entities to test");
@@ -42,7 +42,10 @@ namespace Tester
                     entities.Clear();
                     mwatch.Start();
                     await mdb.Retrieve(retrieves, data => {
-                        entities.AddRange(data);
+                        lock (entities)
+                        {
+                            entities.AddRange(data);
+                        }
                         return true;
                     });
                     mwatch.Stop();
