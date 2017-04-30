@@ -37,6 +37,16 @@ namespace Tester
                     await mdb.Upsert(entities);
                     mwatch.Stop();
                     Console.WriteLine("Upsert took " + mwatch.Elapsed);
+                    mwatch = new Stopwatch();
+                    var retrieves = entities.Select(m => m.Key).ToList();
+                    entities.Clear();
+                    mwatch.Start();
+                    await mdb.Retrieve(retrieves, data => {
+                        entities.AddRange(data);
+                        return true;
+                    });
+                    mwatch.Stop();
+                    Console.WriteLine("Retrieved " + entities.Count + " in " + mwatch.Elapsed);
                 }
             }
             

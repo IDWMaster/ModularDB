@@ -176,20 +176,8 @@ namespace AzureDB
 
         protected override async Task RetrieveEntities(IEnumerable<ScalableEntity> entities, RetrieveCallback cb)
         {
-            bool running = true;
             List<AzureOperationHandle> ops = null;
-            ScalableDb.RetrieveCallback localCallback = m => {
-                if(!running)
-                {        
-                    return false;
-                }
-                if (!cb(m))
-                {
-                    running = false;
-                    return false;
-                }
-                return true;
-            };
+            
             ops = entities.Select(m => new AzureOperationHandle(m.SetPartition(optimal_shard_size), OpType.Retrieve) { callback = cb }).ToList();
             lock (evt)
             {
