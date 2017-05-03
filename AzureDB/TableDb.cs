@@ -56,6 +56,24 @@ namespace AzureDB
             }
         }
 
+        public async Task<IEnumerable<T>> Retrieve<T>(params object[] keys) where T:class, new()
+        {
+            List<T> retval = new List<T>();
+            await Retrieve<T>(keys.Where(m=>m != null), rows => {
+                lock (retval)
+                {
+                    retval.AddRange(rows);
+                }
+                return true;
+            });
+            return retval;
+        }
+
+        public async Task<T> Retrieve<T>(object key) where T:class, new()
+        {
+            return (await Retrieve<T>(key,null)).First();
+        }
+
         public async Task Retrieve<T>(IEnumerable<object> keys, TypedRetrieveCallback<T> callback) where T : class, new()
         {
             var keyFields = typeof(T).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance).Where(m => m.CustomAttributes.Where(a => a.AttributeType == typeof(KeyAttribute)).Any() || m.Name == "Key");
