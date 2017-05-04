@@ -56,10 +56,10 @@ namespace AzureDB
             }
         }
 
-        public async Task<IEnumerable<T>> Retrieve<T>(params object[] keys) where T:class, new()
+        public async Task<IEnumerable<T>> RetrieveMany<T>(params object[] keys) where T:class, new()
         {
             List<T> retval = new List<T>();
-            await Retrieve<T>(keys.Where(m=>m != null), rows => {
+            await Retrieve<T>(keys, rows => {
                 lock (retval)
                 {
                     retval.AddRange(rows);
@@ -69,9 +69,9 @@ namespace AzureDB
             return retval;
         }
 
-        public async Task<T> Retrieve<T>(object key) where T:class, new()
+        public async Task<T> RetrieveOn<T>(object key) where T:class, new()
         {
-            return (await Retrieve<T>(key,null)).First();
+            return (await RetrieveMany<T>(key)).First();
         }
 
         public async Task Retrieve<T>(IEnumerable<object> keys, TypedRetrieveCallback<T> callback) where T : class, new()
