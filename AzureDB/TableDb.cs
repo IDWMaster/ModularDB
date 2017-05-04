@@ -69,7 +69,7 @@ namespace AzureDB
             return retval;
         }
 
-        public async Task<T> RetrieveOn<T>(object key) where T:class, new()
+        public async Task<T> RetrieveOne<T>(object key) where T:class, new()
         {
             return (await RetrieveMany<T>(key)).First();
         }
