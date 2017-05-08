@@ -50,8 +50,12 @@ namespace AzureDB
                 {
                     if(db.ContainsKey(iable.Key))
                     {
-                        iable.Value = db[iable.Key];
-                        retval.Add(iable);
+                        var found = db[iable.Key];
+                        byte[] newkey = new byte[iable.Key.Length];
+                        byte[] newvalue = new byte[found.Length];
+                        Buffer.BlockCopy(iable.Key, 0, newkey, 0, newkey.Length);
+                        Buffer.BlockCopy(found, 0, newvalue, 0, newvalue.Length);
+                        retval.Add(new ScalableEntity(newkey, newvalue));
                     }
                 }
             }
@@ -69,6 +73,10 @@ namespace AzureDB
             {
                 foreach (var iable in entities)
                 {
+                    if(iable.Value == null)
+                    {
+                        throw new NullReferenceException("Value cannot be null.");
+                    }
                     db[iable.Key] = iable.Value;
                 }
             }

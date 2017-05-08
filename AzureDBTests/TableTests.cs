@@ -41,6 +41,10 @@ namespace AzureDB.Tests
                     return true;
                 }).Wait();
                 Assert.AreEqual(entities.Length, values.Count);
+                for(int i = 0;i<entities.Length;i++)
+                {
+                    CollectionAssert.AreEqual(entities[i].Value, values[i].Value);
+                }
             }
         }
     }

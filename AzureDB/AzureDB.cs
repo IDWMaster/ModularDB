@@ -60,13 +60,14 @@ namespace AzureDB
         Dictionary<ulong, List<AzureOperationHandle>> pendingOperations = new Dictionary<ulong, List<AzureOperationHandle>>();
         ManualResetEvent evt = new ManualResetEvent(false);
         bool running = true;
+        System.Threading.Thread mthread;
         public AzureDatabase(string storageAccountString, string tableName)
         {
             CloudStorageAccount account = CloudStorageAccount.Parse(storageAccountString);
             client = account.CreateCloudTableClient();
             client.DefaultRequestOptions.PayloadFormat = TablePayloadFormat.JsonNoMetadata;
             table = client.GetTableReference(tableName);
-            System.Threading.Thread mthread = new Thread(async delegate () {
+            mthread = new Thread(async delegate () {
                 await table.CreateIfNotExistsAsync();
                 while (running)
                 {
@@ -117,7 +118,7 @@ namespace AzureDB
                             List<AzureOperationHandle> finished = new List<AzureOperationHandle>();
                             foreach (var iable in segment)
                             {
-                                var ent = new ScalableEntity(Convert.FromBase64String(Uri.UnescapeDataString(iable.RowKey)),null);
+                                var ent = new ScalableEntity(Convert.FromBase64String(Uri.UnescapeDataString(iable.RowKey)),iable.Value);
                                 finished.AddRange(tableops[ent].Select(m=>m.SetValue(ent.Value)));
                             }
                             //Combine callbacks for finished queries
@@ -177,6 +178,7 @@ namespace AzureDB
                 running = false;
                 evt.Set();
             }
+            mthread.Join();
             base.Dispose(disposing);
         }
         const int optimal_shard_size = 200; //Optimal shard size for a single Azure storage account (calculated through strange Azure voodoo)

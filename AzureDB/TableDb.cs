@@ -13,6 +13,22 @@ namespace AzureDB
         public string Key { get; set; }
     }
 
+    public class TableRow
+    {
+        Dictionary<string, object> keys = new Dictionary<string, object>();
+        public byte[] Key { get; internal set; }
+        public object this[string key]
+        {
+            get
+            {
+                return keys.ContainsKey(key) ? keys[key] : null;
+            } internal set
+            {
+                keys[key] = value;
+            }
+        }
+    }
+
 
     public class Table
     {
@@ -69,10 +85,57 @@ namespace AzureDB
             return retval;
         }
 
+        public async Task<IEnumerable<TableRow>> RetrieveMany(params object[] keys)
+        {
+            List<TableRow> retval = new List<TableRow>();
+            await Retrieve(keys, rows => {
+                lock (retval)
+                {
+                    retval.AddRange(rows);
+                }
+                return true;
+            });
+            return retval;
+        }
+
+        public async Task<TableRow> RetrieveOne(object key)
+        {
+            return (await RetrieveMany(key)).FirstOrDefault();
+        }
+
         public async Task<T> RetrieveOne<T>(object key) where T:class, new()
         {
-            return (await RetrieveMany<T>(key)).First();
+            return (await RetrieveMany<T>(key)).FirstOrDefault();
         }
+
+
+        public async Task Retrieve(IEnumerable<object> keys, TypedRetrieveCallback<TableRow> callback)
+        {
+            await db.Retrieve(keys.Select(m => {
+
+                byte[] data = m.GetType() == typeof(byte[]) ? m as byte[] : m.Serialize();
+                byte[] newdata = new byte[tableName.Length + data.Length];
+                Buffer.BlockCopy(tableName, 0, newdata, 0, tableName.Length);
+                Buffer.BlockCopy(data, 0, newdata, tableName.Length, data.Length);
+                return newdata;
+            }), elems => {
+                return callback(elems.Select(m => {
+                    byte[] newkey = new byte[m.Key.Length - tableName.Length];
+                    Buffer.BlockCopy(m.Key, tableName.Length, newkey, 0, newkey.Length);
+                    m.Key = newkey;
+
+                    TableRow retval = new TableRow();
+                    BinaryReader mreader = new BinaryReader(new MemoryStream(m.Value));
+                    retval.Key = m.Key;
+                    while (mreader.BaseStream.Position != mreader.BaseStream.Length)
+                    {
+                        retval[mreader.ReadNullTerminatedString()] = DataFormats.Deserialize(mreader);
+                    }
+                    return retval;
+                }));
+            });
+        }
+
 
         public async Task Retrieve<T>(IEnumerable<object> keys, TypedRetrieveCallback<T> callback) where T : class, new()
         {

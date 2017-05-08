@@ -28,6 +28,17 @@ namespace AzureDB
         {
             this.databases = databases;
         }
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing)
+            {
+                foreach(var iable in databases)
+                {
+                    iable.Dispose();
+                }
+            }
+        }
         public override Task<ScalableDb[]> GetShardServers()
         {
             TaskCompletionSource<ScalableDb[]> retval = new TaskCompletionSource<ScalableDb[]>();
