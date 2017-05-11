@@ -14,6 +14,8 @@
 
 
 using System;
+using System.Net;
+using System.Net.Sockets;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -38,13 +40,63 @@ namespace AzureDB
             return this;
         }
     }
+    
+    public abstract class ScalableLock:IDisposable
+    {
+        #region IDisposable Support
+        private bool disposedValue = false; // To detect redundant calls
 
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposedValue)
+            {
+                if (disposing)
+                {
+
+                }
+                
+                disposedValue = true;
+            }
+        }
+        
+        public void Dispose()
+        {
+            Dispose(true);
+        }
+        #endregion
+
+    }
+
+    class DefaultNetworkLock:ScalableLock
+    {
+        public uint LockID;
+        public HashSet<byte[]> rows = new HashSet<byte[]>(ByteComparer.instance);
+
+    }
+    class LockComparer : IEqualityComparer<DefaultNetworkLock>
+    {
+        public static LockComparer Instance = new LockComparer();
+        public bool Equals(DefaultNetworkLock x, DefaultNetworkLock y)
+        {
+            if(x.LockID == y.LockID)
+            {
+                return true;
+            }
+            return x.rows.Where(m=>y.rows.Contains(m)).Any();
+        }
+
+        public int GetHashCode(DefaultNetworkLock obj)
+        {
+            return (int)obj.rows.SelectMany(m => m).ToList().ToArray().Hash();
+        }
+    }
     public abstract class ScalableDb:IDisposable
     {
         //Database design for scalable architecture
         // Assumptions -- PartitionKey == server ID which == hash(key), RowKey == key
         // Secondary (optional) range indices -- PartitionKey == First N bits of key where N is the number of desired partitions
 
+        
         public delegate bool RetrieveCallback(IEnumerable<ScalableEntity> entities);
         public ScalableDb()
         {

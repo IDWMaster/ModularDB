@@ -8,6 +8,49 @@ using System.Threading.Tasks;
 
 namespace AzureDB
 {
+    class Redirect
+    {
+        /// <summary>
+        /// Fully-qualified name of record to redirect
+        /// </summary>
+        public byte[] Key { get; set; }
+        /// <summary>
+        /// Destination redirect pointer
+        /// </summary>
+        public byte[] Destination { get; set; }
+        /// <summary>
+        /// Operation code
+        /// 0 -- Log file redirect (transaction)
+        /// </summary>
+        public int OpCode { get; set; }
+    }
+
+    /// <summary>
+    /// Log entry for a transaction
+    /// </summary>
+    class TransactionEntry
+    {
+        /// <summary>
+        /// Key == Timestamp + GUID (auto-initialized in constructor)
+        /// </summary>
+        public byte[] Key { get; set; }
+        /// <summary>
+        /// Pointer to database record (fully-qualified name)
+        /// </summary>
+        public byte[] Record { get; set; }
+        /// <summary>
+        /// OPCODE
+        /// 0 -- Upsert
+        /// 1 -- Commit
+        /// </summary>
+        public int OpCode { get; set; }
+        public TransactionEntry()
+        {
+            Key = new byte[16 + sizeof(long)];
+            Buffer.BlockCopy(BitConverter.GetBytes(DateTime.UtcNow.ToBinary()),0,Key,0,sizeof(long));
+            Buffer.BlockCopy(Guid.NewGuid().ToByteArray(), 0, Key, sizeof(long), 16);
+        }
+    }
     class TableMetadata
     {
         public string Key { get; set; }
@@ -72,6 +115,9 @@ namespace AzureDB
             }
         }
 
+        
+
+
         public async Task<IEnumerable<T>> RetrieveMany<T>(params object[] keys) where T:class, new()
         {
             List<T> retval = new List<T>();
@@ -84,6 +130,7 @@ namespace AzureDB
             });
             return retval;
         }
+
 
         public async Task<IEnumerable<TableRow>> RetrieveMany(params object[] keys)
         {
@@ -109,11 +156,27 @@ namespace AzureDB
         }
 
 
+        //TODO: Transactions
+        /**
+         * Begin -- Start writing log file, with key being current DateTime+Guid. Write pointers to redirect I/O to commit logfile.
+         * Commit -- Add commit flag to transaction; causing the I/O to be redirected into the logfile.
+         * Finalize -- Update entries on disk. Delete pointers, followed by logfile.
+         * */
+
         public async Task Retrieve(IEnumerable<object> keys, TypedRetrieveCallback<TableRow> callback)
         {
-            await db.Retrieve(keys.Select(m => {
+            //Compute direct keys
+            List<byte[]> directKeys = keys.Select(m => m.GetType() == typeof(byte[]) ? m as byte[] : m.Serialize()).ToList();
+            
+            Task transactionEnumTask = tdb["__transactions"].RetrieveDirect(directKeys, rows => {
+                return true;
+            });
+        }
 
-                byte[] data = m.GetType() == typeof(byte[]) ? m as byte[] : m.Serialize();
+        async Task RetrieveDirect(IEnumerable<byte[]> keys, TypedRetrieveCallback<TableRow> callback)
+        {
+            await db.Retrieve(keys.Select(m => {
+                byte[] data = m;
                 byte[] newdata = new byte[tableName.Length + data.Length];
                 Buffer.BlockCopy(tableName, 0, newdata, 0, tableName.Length);
                 Buffer.BlockCopy(data, 0, newdata, tableName.Length, data.Length);
@@ -177,12 +240,18 @@ namespace AzureDB
         }
         
 
+
         public Task Upsert<T>(params T[] rows)
         {
             return Upsert(rows as IEnumerable<T>);
         }
 
-        public async Task Upsert<T>(IEnumerable<T> rows)
+        public Task UpsertTransacted<T>(params T[] rows)
+        {
+            return Upsert(rows as IEnumerable<T>,true);
+        }
+
+        public async Task Upsert<T>(IEnumerable<T> rows, bool useTransaction = false)
         {
             var keyFields = typeof(T).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance).Where(m => m.CustomAttributes.Where(a => a.AttributeType == typeof(KeyAttribute)).Any() || m.Name == "Key");
             if (!keyFields.Any())
