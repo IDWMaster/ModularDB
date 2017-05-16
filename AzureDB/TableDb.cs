@@ -70,6 +70,24 @@ namespace AzureDB
                 keys[key] = value;
             }
         }
+
+        public T As<T>() where T:class,new()
+        {
+            T retval = new T();
+            var keyFields = typeof(T).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance).Where(m => m.CustomAttributes.Where(a => a.AttributeType == typeof(KeyAttribute)).Any() || m.Name == "Key");
+            if (!keyFields.Any())
+            {
+                throw new InvalidCastException("Type " + typeof(T).Name + " does not have a Key property. Please declare a Key property.");
+            }
+            var keyField = keyFields.First();
+            keyField.SetValue(retval, keyField.PropertyType == typeof(byte[]) ? Key : DataFormats.Deserialize(Key));
+            foreach (var iable in keys)
+            {
+                var prop = typeof(T).GetProperty(iable.Key, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                prop?.SetValue(retval, iable.Value);
+            }
+            return retval;
+        }
     }
 
 
@@ -166,22 +184,31 @@ namespace AzureDB
         public async Task Retrieve(IEnumerable<object> keys, TypedRetrieveCallback<TableRow> callback)
         {
             //Compute direct keys
-            List<byte[]> directKeys = keys.Select(m => m.GetType() == typeof(byte[]) ? m as byte[] : m.Serialize()).ToList();
-            
-            Task transactionEnumTask = tdb["__transactions"].RetrieveDirect(directKeys, rows => {
+            List<byte[]> directKeys = keys.Select(m => m.GetType() == typeof(byte[]) ? m as byte[] : m.Serialize()).Select(m=>{
+                byte[] me = new byte[tableName.Length + m.Length];
+                Buffer.BlockCopy(tableName, 0, me, 0, tableName.Length);
+                Buffer.BlockCopy(m, 0, me, tableName.Length, m.Length);
+                return me;
+            }).ToList();
+
+            List<Redirect> redirects = new List<Redirect>();
+            Task transactionEnumTask = tdb["__redirects"].RetrieveDirect(directKeys, _rows => {
+                redirects.AddRange(_rows.Select(m => m.As<Redirect>()));
                 return true;
+            });
+            List<TableRow> pendingRows = new List<TableRow>();
+            Task fetchTask = await RetrieveDirect(directKeys, rows => {
+                lock(pendingRows)
+                {
+                    pendingRows.AddRange(rows);
+                    if
+                }
             });
         }
 
         async Task RetrieveDirect(IEnumerable<byte[]> keys, TypedRetrieveCallback<TableRow> callback)
         {
-            await db.Retrieve(keys.Select(m => {
-                byte[] data = m;
-                byte[] newdata = new byte[tableName.Length + data.Length];
-                Buffer.BlockCopy(tableName, 0, newdata, 0, tableName.Length);
-                Buffer.BlockCopy(data, 0, newdata, tableName.Length, data.Length);
-                return newdata;
-            }), elems => {
+            await db.Retrieve(keys, elems => {
                 return callback(elems.Select(m => {
                     byte[] newkey = new byte[m.Key.Length - tableName.Length];
                     Buffer.BlockCopy(m.Key, tableName.Length, newkey, 0, newkey.Length);
@@ -200,43 +227,9 @@ namespace AzureDB
         }
 
 
-        public async Task Retrieve<T>(IEnumerable<object> keys, TypedRetrieveCallback<T> callback) where T : class, new()
+        public Task Retrieve<T>(IEnumerable<object> keys, TypedRetrieveCallback<T> callback) where T : class, new()
         {
-            var keyFields = typeof(T).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance).Where(m => m.CustomAttributes.Where(a => a.AttributeType == typeof(KeyAttribute)).Any() || m.Name == "Key");
-            if (!keyFields.Any())
-            {
-                throw new InvalidCastException("Type " + typeof(T).Name + " does not have a Key property. Please declare a Key property.");
-            }
-            var keyField = keyFields.First();
-            await db.Retrieve(keys.Select(m => {
-
-                byte[] data = m.GetType() == typeof(byte[]) ? m as byte[] : m.Serialize();
-                byte[] newdata = new byte[tableName.Length + data.Length];
-                Buffer.BlockCopy(tableName, 0, newdata, 0, tableName.Length);
-                Buffer.BlockCopy(data, 0, newdata, tableName.Length, data.Length);
-                return newdata;
-            }), elems => {
-                return callback(elems.Select(m => {
-                    byte[] newkey = new byte[m.Key.Length - tableName.Length];
-                    Buffer.BlockCopy(m.Key, tableName.Length, newkey, 0, newkey.Length);
-                    m.Key = newkey;
-
-                    T retval = new T();
-                    BinaryReader mreader = new BinaryReader(new MemoryStream(m.Value));
-                    object key = keyField.PropertyType == typeof(byte[]) ? m.Key : DataFormats.Deserialize(m.Key);
-                    keyField.SetValue(retval, key);
-                    while (mreader.BaseStream.Position != mreader.BaseStream.Length)
-                    {
-                        string props = mreader.ReadNullTerminatedString();
-                        var prop = typeof(T).GetProperty(props, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                        if (prop != null)
-                        {
-                            prop.SetValue(retval, DataFormats.Deserialize(mreader));
-                        }
-                    }
-                    return retval;
-                }));
-            });
+            return Retrieve(keys, rows=>callback(rows.Select(m=>m.As<T>())));
         }
         
 
