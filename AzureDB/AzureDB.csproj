@@ -79,6 +79,7 @@
     <Compile Include="ScalableDb.cs" />
     <Compile Include="ScaledAzureDb.cs" />
     <Compile Include="TableDb.cs" />
+    <Compile Include="TransactedDb.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

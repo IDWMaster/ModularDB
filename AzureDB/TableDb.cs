@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.IO;
@@ -8,55 +9,10 @@ using System.Threading.Tasks;
 
 namespace AzureDB
 {
-    class Redirect
-    {
-        /// <summary>
-        /// Fully-qualified name of record to redirect
-        /// </summary>
-        public byte[] Key { get; set; }
-        /// <summary>
-        /// Destination redirect pointer
-        /// </summary>
-        public byte[] Destination { get; set; }
-        /// <summary>
-        /// Operation code
-        /// 0 -- Log file redirect (transaction)
-        /// </summary>
-        public int OpCode { get; set; }
-    }
 
-    /// <summary>
-    /// Log entry for a transaction
-    /// </summary>
-    class TransactionEntry
-    {
-        /// <summary>
-        /// Key == Timestamp + GUID (auto-initialized in constructor)
-        /// </summary>
-        public byte[] Key { get; set; }
-        /// <summary>
-        /// Pointer to database record (fully-qualified name)
-        /// </summary>
-        public byte[] Record { get; set; }
-        /// <summary>
-        /// OPCODE
-        /// 0 -- Upsert
-        /// 1 -- Commit
-        /// </summary>
-        public int OpCode { get; set; }
-        public TransactionEntry()
-        {
-            Key = new byte[16 + sizeof(long)];
-            Buffer.BlockCopy(BitConverter.GetBytes(DateTime.UtcNow.ToBinary()),0,Key,0,sizeof(long));
-            Buffer.BlockCopy(Guid.NewGuid().ToByteArray(), 0, Key, sizeof(long), 16);
-        }
-    }
-    class TableMetadata
-    {
-        public string Key { get; set; }
-    }
+    
 
-    public class TableRow
+    public class TableRow:IEnumerable<KeyValuePair<string,object>>
     {
         Dictionary<string, object> keys = new Dictionary<string, object>();
         public byte[] Key { get; internal set; }
@@ -65,10 +21,28 @@ namespace AzureDB
             get
             {
                 return keys.ContainsKey(key) ? keys[key] : null;
-            } internal set
+            }
+            set
             {
                 keys[key] = value;
             }
+        }
+
+        public static TableRow From(object obj)
+        {
+            var keyFields = obj.GetType().GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance).Where(m => m.CustomAttributes.Where(a => a.AttributeType == typeof(KeyAttribute)).Any() || m.Name == "Key");
+            if (!keyFields.Any())
+            {
+                throw new InvalidCastException("Type " + obj.GetType().Name + " does not have a Key property. Please declare a Key property.");
+            }
+            TableRow retval = new TableRow();
+            var keyField = keyFields.First();
+            retval.Key = keyField.PropertyType == typeof(byte[]) ? keyField.GetValue(obj) as byte[] : keyField.GetValue(obj).Serialize();
+            foreach(var iable in obj.GetType().GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            {
+                retval.keys[iable.Name] = iable.GetValue(obj);
+            }
+            return retval;
         }
 
         public T As<T>() where T:class,new()
@@ -87,6 +61,16 @@ namespace AzureDB
                 prop?.SetValue(retval, iable.Value);
             }
             return retval;
+        }
+
+        public IEnumerator<KeyValuePair<string, object>> GetEnumerator()
+        {
+            return keys.GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return keys.GetEnumerator();
         }
     }
 
@@ -174,14 +158,9 @@ namespace AzureDB
         }
 
 
-        //TODO: Transactions
-        /**
-         * Begin -- Start writing log file, with key being current DateTime+Guid. Write pointers to redirect I/O to commit logfile.
-         * Commit -- Add commit flag to transaction; causing the I/O to be redirected into the logfile.
-         * Finalize -- Update entries on disk. Delete pointers, followed by logfile.
-         * */
+        
 
-        public async Task Retrieve(IEnumerable<object> keys, TypedRetrieveCallback<TableRow> callback)
+        public Task Retrieve(IEnumerable<object> keys, TypedRetrieveCallback<TableRow> callback)
         {
             //Compute direct keys
             List<byte[]> directKeys = keys.Select(m => m.GetType() == typeof(byte[]) ? m as byte[] : m.Serialize()).Select(m=>{
@@ -190,20 +169,7 @@ namespace AzureDB
                 Buffer.BlockCopy(m, 0, me, tableName.Length, m.Length);
                 return me;
             }).ToList();
-
-            List<Redirect> redirects = new List<Redirect>();
-            Task transactionEnumTask = tdb["__redirects"].RetrieveDirect(directKeys, _rows => {
-                redirects.AddRange(_rows.Select(m => m.As<Redirect>()));
-                return true;
-            });
-            List<TableRow> pendingRows = new List<TableRow>();
-            Task fetchTask = await RetrieveDirect(directKeys, rows => {
-                lock(pendingRows)
-                {
-                    pendingRows.AddRange(rows);
-                    if
-                }
-            });
+            return RetrieveDirect(directKeys,callback);
         }
 
         async Task RetrieveDirect(IEnumerable<byte[]> keys, TypedRetrieveCallback<TableRow> callback)
@@ -238,29 +204,23 @@ namespace AzureDB
         {
             return Upsert(rows as IEnumerable<T>);
         }
-
-        public Task UpsertTransacted<T>(params T[] rows)
+        
+        public Task Upsert<T>(IEnumerable<T> rows)
         {
-            return Upsert(rows as IEnumerable<T>,true);
+            return Upsert(rows.Select(row => TableRow.From(row)));
         }
 
-        public async Task Upsert<T>(IEnumerable<T> rows, bool useTransaction = false)
+        public async Task Upsert(IEnumerable<TableRow> rows)
         {
-            var keyFields = typeof(T).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance).Where(m => m.CustomAttributes.Where(a => a.AttributeType == typeof(KeyAttribute)).Any() || m.Name == "Key");
-            if (!keyFields.Any())
-            {
-                throw new InvalidCastException("Type " + typeof(T).Name + " does not have a Key property. Please declare a Key property.");
-            }
-            var keyField = keyFields.First();
-            await db.Upsert(rows.Select(m => {
 
-                byte[] key = keyField.PropertyType == typeof(byte[]) ? keyField.GetValue(m) as byte[] : keyField.GetValue(m).Serialize();
+            await db.Upsert(rows.Select(m => {
+                byte[] key = m.Key;
                 MemoryStream mstream = new MemoryStream();
                 BinaryWriter mwriter = new BinaryWriter(mstream);
-                foreach (var iable in typeof(T).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+                foreach (var iable in m)
                 {
-                    mwriter.WriteString(iable.Name);
-                    iable.GetValue(m).Serialize(mwriter);
+                    mwriter.WriteString(iable.Key);
+                    iable.Value.Serialize(mwriter);
                 }
                 byte[] me = new byte[key.Length + tableName.Length];
                 Buffer.BlockCopy(tableName, 0, me, 0, tableName.Length);
