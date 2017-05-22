@@ -25,7 +25,7 @@ namespace AzureDB
 {
     enum OpType
     {
-        Upsert, Retrieve, Nop
+        Upsert, Retrieve, RangeRetrieve, Nop
     }
     class AzureOperationHandle
     {
@@ -33,6 +33,8 @@ namespace AzureDB
         public ScalableEntity Entity;
         public OpType Type;
         public ScalableDb.RetrieveCallback callback;
+        public byte[] StartRange;
+        public byte[] EndRange;
         public AzureOperationHandle(ScalableEntity entity, OpType type)
         {
             Entity = entity;
@@ -111,6 +113,7 @@ namespace AzureDB
                                         query = TableQuery.CombineFilters(query, TableOperators.Or, TableQuery.CombineFilters(TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, iable.Entity.Partition.ToString()), TableOperators.And, TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.Equal, Uri.EscapeDataString(Convert.ToBase64String(iable.Entity.Key)))));
                                     }
                                 }
+                                
                                 compiledQuery = new TableQuery<AzureEntity>().Where(query);
                             }
                             var segment = await table.ExecuteQuerySegmentedAsync(compiledQuery, token);
@@ -136,7 +139,7 @@ namespace AzureDB
                                 await runSegmentedQuery(tableops, token, compiledQuery);
                             }
                         };
-                        foreach (var op in shard.Value.Where(m=>m.Type == OpType.Retrieve))
+                        foreach (var op in shard.Value.Where(m=>m.Type == OpType.Retrieve || m.Type == OpType.RangeRetrieve))
                         {
                             if(!retrieves.ContainsKey(op.Entity))
                             {
@@ -209,6 +212,22 @@ namespace AzureDB
                 evt.Set();
             }
             await Task.WhenAll(ops.Select(m => m.Task.Task));
+        }
+
+        public override Task RetrieveRange(byte[] start, byte[] end, RetrieveCallback cb)
+        {
+            AzureOperationHandle rangeRetrieve = new AzureOperationHandle(null, OpType.RangeRetrieve) { StartRange = start, EndRange = end, callback = cb };
+            lock(evt)
+            {
+                if (!pendingOperations.ContainsKey(0))
+                {
+                    pendingOperations.Add(0, new List<AzureOperationHandle>());
+                }
+                pendingOperations[0].Add(rangeRetrieve);
+                evt.Set();
+            }
+            return rangeRetrieve.Task.Task;
+
         }
 
         protected override async Task UpsertEntities(IEnumerable<ScalableEntity> entities)

@@ -20,9 +20,26 @@ using System.Threading.Tasks;
 
 namespace AzureDB
 {
-    public class ByteComparer : IEqualityComparer<byte[]>
+    public class ByteComparer : IEqualityComparer<byte[]>, IComparer<byte[]>
     {
        public static ByteComparer instance = new ByteComparer();
+
+        public int Compare(byte[] x, byte[] y)
+        {
+            for(int i = 0;i<x.Length;i++)
+            {
+                if(x[i]<y[i])
+                {
+                    return -1;
+                }
+                if(x[i]>y[i])
+                {
+                    return 1;
+                }
+            }
+            return 0;
+        }
+
         public bool Equals(byte[] x, byte[] y)
         {
             int len = x.Length;

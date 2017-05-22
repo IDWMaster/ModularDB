@@ -28,6 +28,8 @@ namespace AzureDB
     public class MemoryDb:ScalableDb
     {
         Dictionary<byte[], byte[]> db;
+        byte[][] index = new byte[0][];
+        int indexLen;
         public MemoryDb()
         {
             db = new Dictionary<byte[], byte[]>(new ByteComparer());
@@ -37,6 +39,46 @@ namespace AzureDB
             TaskCompletionSource<ulong> src = new TaskCompletionSource<ulong>();
             src.SetResult(1);
             return src.Task;
+        }
+
+        
+
+        public override Task RetrieveRange(byte[] start, byte[] end, RetrieveCallback cb)
+        {
+            TaskCompletionSource<bool> tsktsktsktsk = new TaskCompletionSource<bool>();
+            List<ScalableEntity> entities = new List<ScalableEntity>();
+
+            lock (db)
+            {
+                int startIdx = 0;
+                if (start != null)
+                {
+                    int found = Array.BinarySearch(index, start, new ByteComparer());
+                    if (found < 0)
+                    {
+                        startIdx = ~found;
+                    }
+                    else
+                    {
+                        startIdx = found + 1; //exclusive search
+                    }
+                }
+                for (int i = startIdx; i < index.Length; i++)
+                {
+                    byte[] key = index[i];
+                    if (end != null)
+                    {
+                        if (ByteComparer.instance.Compare(key, end) >= 0)
+                        {
+                            break;
+                        }
+                    }
+                    entities.Add(new ScalableEntity(key, db[key]));
+                }
+            }
+            cb(entities);
+            tsktsktsktsk.SetResult(true);
+            return tsktsktsktsk.Task;
         }
 
         protected override Task RetrieveEntities(IEnumerable<ScalableEntity> entities, RetrieveCallback cb)

@@ -45,6 +45,10 @@ namespace AzureDB
             retval.SetResult(databases);
             return retval.Task;
         }
+        public override Task RetrieveRange(byte[] start, byte[] end, RetrieveCallback cb)
+        {
+            throw new NotImplementedException();
+        }
         protected override Task RetrieveEntities(IEnumerable<ScalableEntity> entities, RetrieveCallback cb)
         {
             throw new NotImplementedException();

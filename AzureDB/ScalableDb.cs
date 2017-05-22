@@ -102,7 +102,9 @@ namespace AzureDB
         {
             
         }
-        
+
+
+        public abstract Task RetrieveRange(byte[] start, byte[] end, RetrieveCallback cb);
 
         public async Task Retrieve(IEnumerable<byte[]> keys, RetrieveCallback cb)
         {
