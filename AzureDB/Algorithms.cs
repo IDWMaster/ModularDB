@@ -62,9 +62,24 @@ namespace AzureDB
             return (int)obj.Hash();
         }
     }
-    public class EntityComparer : IEqualityComparer<ScalableEntity>
+    public class EntityComparer : IEqualityComparer<ScalableEntity>, IComparer<ScalableEntity>, System.Collections.IComparer
     {
         public static EntityComparer instance = new EntityComparer();
+
+        public int Compare(ScalableEntity x, ScalableEntity y)
+        {
+            return ByteComparer.instance.Compare(x.Key, y.Key);
+        }
+
+        public int Compare(object x, object y)
+        {
+            if(x == y)
+            {
+                return 0;
+            }
+            return Compare(x as ScalableEntity, y as ScalableEntity);
+        }
+
         public bool Equals(ScalableEntity x, ScalableEntity y)
         {
            return ByteComparer.instance.Equals(x.Key, y.Key);

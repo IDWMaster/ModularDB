@@ -25,7 +25,7 @@ namespace AzureDB.Tests
             Assert.IsFalse(partitions.Where(m => Math.Abs(average - m) > partitions.Length).Any());
 
             //Test it with a pseudo-random dataset
-            Random mrand = new Random();
+            Random mrand = new Random(42);
             for (int i = 0; i < 65536; i++)
             {
                 int eger = mrand.Next();

@@ -29,6 +29,7 @@ namespace AzureDB
         public byte[] Key;
         public byte[] Value;
         internal ulong Partition;
+        public bool UseLinearHash = false;
         public ScalableEntity(byte[] key, byte[] value)
         {
             Key = key;
@@ -36,7 +37,14 @@ namespace AzureDB
         }
         public ScalableEntity SetPartition(ulong partitionCount)
         {
-            Partition = Key.Hash() % partitionCount;
+            if (UseLinearHash)
+            {
+                Partition = Key.LinearHash() % partitionCount;
+            }
+            else
+            {
+                Partition = Key.Hash() % partitionCount;
+            }
             return this;
         }
     }
@@ -104,7 +112,50 @@ namespace AzureDB
         }
 
 
-        public abstract Task RetrieveRange(byte[] start, byte[] end, RetrieveCallback cb);
+        protected abstract Task RetrieveRange(byte[] start, byte[] end, RetrieveCallback cb);
+
+        public async Task Retrieve(byte[] start, byte[] end, RetrieveCallback cb)
+        {
+            var shardCount = await GetShardCount();
+            var servers = await GetShardServers();
+
+            if (servers == null)
+            {
+                await RetrieveRange(start, end, cb);
+            }
+            else
+            {
+                bool running = true;
+                int a = 0;
+                int b = (int)shardCount;
+                if(start != null)
+                {
+                    a = (int)(start.LinearHash() % shardCount);
+                }
+                if(end != null)
+                {
+                    b = (int)(end.LinearHash() % shardCount)+1;
+                }
+
+                List<Task> pending = new List<Task>();
+                for (int i = a;i<b;i++)
+                {
+                    pending.Add(servers[i].RetrieveRange(start,end, m => {
+                        if (!running)
+                        {
+                            return false;
+                        }
+                        if (!cb(m))
+                        {
+                            running = false;
+                            return false;
+                        }
+                        return true;
+                    }));
+                }
+                await Task.WhenAll(pending);
+            }
+        }
 
         public async Task Retrieve(IEnumerable<byte[]> keys, RetrieveCallback cb)
         {

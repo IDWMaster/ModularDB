@@ -28,7 +28,7 @@ namespace AzureDB
     public class MemoryDb:ScalableDb
     {
         Dictionary<byte[], byte[]> db;
-        byte[][] index = new byte[0][];
+        byte[][] index = new byte[1][];
         int indexLen;
         public MemoryDb()
         {
@@ -43,7 +43,7 @@ namespace AzureDB
 
         
 
-        public override Task RetrieveRange(byte[] start, byte[] end, RetrieveCallback cb)
+        protected override Task RetrieveRange(byte[] start, byte[] end, RetrieveCallback cb)
         {
             TaskCompletionSource<bool> tsktsktsktsk = new TaskCompletionSource<bool>();
             List<ScalableEntity> entities = new List<ScalableEntity>();
@@ -63,7 +63,7 @@ namespace AzureDB
                         startIdx = found + 1; //exclusive search
                     }
                 }
-                for (int i = startIdx; i < index.Length; i++)
+                for (int i = startIdx; i < indexLen; i++)
                 {
                     byte[] key = index[i];
                     if (end != null)
@@ -119,6 +119,21 @@ namespace AzureDB
                     {
                         throw new NullReferenceException("Value cannot be null.");
                     }
+                    if(index.Length == indexLen)
+                    {
+                        byte[][] newIndex = new byte[index.Length * 2][];
+                        Array.Copy(index, newIndex, index.Length);
+                        index = newIndex;
+                    }
+                    int idx = Array.BinarySearch(index,0,indexLen, iable.Key,ByteComparer.instance);
+                    if(idx<0)
+                    {
+                        idx = ~idx;
+                    }
+                    Array.ConstrainedCopy(index, idx, index, idx + 1, indexLen-idx);
+                    index[idx] = iable.Key;
+                    indexLen++;
+
                     db[iable.Key] = iable.Value;
                 }
             }

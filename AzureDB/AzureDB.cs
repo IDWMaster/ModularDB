@@ -98,6 +98,35 @@ namespace AzureDB
                                 upserts = new TableBatchOperation();
                             }
                         }
+                        Func<IEnumerable<string>, string> and = (q) => {
+                            string query = null;
+                            foreach(string er in q.Where(m=>m != null))
+                            {
+                                if(query == null)
+                                {
+                                    query = er;
+                                }else
+                                {
+                                    query = TableQuery.CombineFilters(query, TableOperators.And, er);
+                                }
+                            }
+                            return query;
+                        };
+                        Func<IEnumerable<string>, string> or = (q) => {
+                            string query = null;
+                            foreach (string er in q.Where(m => m != null))
+                            {
+                                if (query == null)
+                                {
+                                    query = er;
+                                }
+                                else
+                                {
+                                    query = TableQuery.CombineFilters(query, TableOperators.Or, er);
+                                }
+                            }
+                            return query;
+                        };
                         Func<Dictionary<ScalableEntity,List<AzureOperationHandle>>,TableContinuationToken,TableQuery<AzureEntity>, Task> runSegmentedQuery = null;
                         runSegmentedQuery = async (tableops,token, compiledQuery) => {
                             if(compiledQuery == null)
@@ -113,7 +142,23 @@ namespace AzureDB
                                         query = TableQuery.CombineFilters(query, TableOperators.Or, TableQuery.CombineFilters(TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, iable.Entity.Partition.ToString()), TableOperators.And, TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.Equal, Uri.EscapeDataString(Convert.ToBase64String(iable.Entity.Key)))));
                                     }
                                 }
-                                
+
+                                foreach(var iable in tableops.Values.SelectMany(m=>m).Where(m=>m.Type == OpType.RangeRetrieve))
+                                {
+                                    string startQuery = null;
+                                    string endQuery = null;
+                                    if(iable.StartRange != null)
+                                    {
+                                        startQuery = TableQuery.CombineFilters(TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.GreaterThan, iable.StartRange.LinearHash().ToString()),TableOperators.And,TableQuery.GenerateFilterCondition("RowKey",QueryComparisons.GreaterThan, Uri.EscapeDataString(Convert.ToBase64String(iable.StartRange))));
+                                    }
+                                    if (iable.EndRange != null)
+                                    {
+                                        endQuery = TableQuery.CombineFilters(TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.LessThan, iable.EndRange.LinearHash().ToString()), TableOperators.And, TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.LessThan, Uri.EscapeDataString(Convert.ToBase64String(iable.EndRange))));
+                                    }
+                                    query = or(new string[] {query ,and(new string[] { startQuery, endQuery }) });
+                                    
+
+                                }
                                 compiledQuery = new TableQuery<AzureEntity>().Where(query);
                             }
                             var segment = await table.ExecuteQuerySegmentedAsync(compiledQuery, token);
@@ -214,7 +259,7 @@ namespace AzureDB
             await Task.WhenAll(ops.Select(m => m.Task.Task));
         }
 
-        public override Task RetrieveRange(byte[] start, byte[] end, RetrieveCallback cb)
+        protected override Task RetrieveRange(byte[] start, byte[] end, RetrieveCallback cb)
         {
             AzureOperationHandle rangeRetrieve = new AzureOperationHandle(null, OpType.RangeRetrieve) { StartRange = start, EndRange = end, callback = cb };
             lock(evt)
