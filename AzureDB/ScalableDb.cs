@@ -111,6 +111,7 @@ namespace AzureDB
             
         }
 
+        protected abstract Task DeleteEntities(IEnumerable<ScalableEntity> entities);
 
         protected abstract Task RetrieveRange(byte[] start, byte[] end, RetrieveCallback cb);
 
@@ -211,6 +212,33 @@ namespace AzureDB
                 foreach (var shard in shards)
                 {
                     pending.Add(servers[shard.Key].UpsertEntities(shard));
+                }
+                await Task.WhenAll(pending);
+            }
+        }
+
+
+        /// <summary>
+        /// Deletes entities from the database
+        /// </summary>
+        /// <param name="entities">The entities to upsert</param>
+        public async Task Delete(IEnumerable<byte[]> keys)
+        {
+            var shardCount = await GetShardCount();
+            var servers = await GetShardServers();
+
+            if (servers == null)
+            {
+                await DeleteEntities(keys.Select(m => new ScalableEntity(m, null).SetPartition(shardCount)));
+            }
+            else
+            {
+                bool running = true;
+                var shards = keys.Select(m => new ScalableEntity(m, null).SetPartition(shardCount)).ToLookup(m => m.Partition);
+                List<Task> pending = new List<Task>();
+                foreach (var shard in shards)
+                {
+                    pending.Add(servers[shard.Key].DeleteEntities(shard));
                 }
                 await Task.WhenAll(pending);
             }

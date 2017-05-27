@@ -41,8 +41,9 @@ namespace AzureDB
             return src.Task;
         }
 
-        
 
+
+        
         protected override Task RetrieveRange(byte[] start, byte[] end, RetrieveCallback cb)
         {
             TaskCompletionSource<bool> tsktsktsktsk = new TaskCompletionSource<bool>();
@@ -81,6 +82,22 @@ namespace AzureDB
             return tsktsktsktsk.Task;
         }
 
+
+        protected override Task DeleteEntities(IEnumerable<ScalableEntity> entities)
+        {
+            TaskCompletionSource<bool> src = new TaskCompletionSource<bool>();
+
+            List<ScalableEntity> retval = new List<ScalableEntity>();
+            lock (db)
+            {
+                foreach (var iable in entities)
+                {
+                    db.Remove(iable.Key);
+                }
+            }
+            src.SetResult(true);
+            return src.Task;
+        }
         protected override Task RetrieveEntities(IEnumerable<ScalableEntity> entities, RetrieveCallback cb)
         {
             TaskCompletionSource<bool> src = new TaskCompletionSource<bool>();

@@ -45,6 +45,10 @@ namespace AzureDB
             retval.SetResult(databases);
             return retval.Task;
         }
+        protected override Task DeleteEntities(IEnumerable<ScalableEntity> entities)
+        {
+            throw new NotImplementedException();
+        }
         protected override Task RetrieveRange(byte[] start, byte[] end, RetrieveCallback cb)
         {
             throw new NotImplementedException();

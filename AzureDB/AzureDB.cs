@@ -25,7 +25,7 @@ namespace AzureDB
 {
     enum OpType
     {
-        Upsert, Retrieve, RangeRetrieve, Nop
+        Upsert, Retrieve, RangeRetrieve, Nop, Delete
     }
     class AzureOperationHandle
     {
@@ -93,17 +93,31 @@ namespace AzureDB
                     foreach(var shard in ops)
                     {
                         TableBatchOperation upserts = new TableBatchOperation();
+                        TableBatchOperation deletions = new TableBatchOperation();
                         Dictionary<ScalableEntity,List<AzureOperationHandle>> retrieves = new Dictionary<ScalableEntity, List<AzureOperationHandle>>(EntityComparer.instance);
                         Dictionary<ByteRange, List<AzureOperationHandle>> rangeRetrieves = new Dictionary<ByteRange, List<AzureOperationHandle>>();
-                        foreach(var op in shard.Value.Where(m=>m.Type == OpType.Upsert))
+                        foreach(var op in shard.Value.Where(m=>m.Type == OpType.Upsert || m.Type == OpType.Delete))
                         {
-                            
-                            upserts.Add(TableOperation.InsertOrReplace(new AzureEntity() { PartitionKey = op.Entity.Partition.ToString(), RowKey = Uri.EscapeDataString(Convert.ToBase64String(op.Entity.Key)), Value = op.Entity.Value }));
-                            if (upserts.Count == 100)
+                            switch(op.Type)
                             {
-                                runningTasks.Add(table.ExecuteBatchAsync(upserts));
-                                upserts = new TableBatchOperation();
+                                case OpType.Upsert:
+                                    upserts.Add(TableOperation.InsertOrReplace(new AzureEntity() { PartitionKey = op.Entity.Partition.ToString(), RowKey = Uri.EscapeDataString(Convert.ToBase64String(op.Entity.Key)), Value = op.Entity.Value }));
+                                    if (upserts.Count == 100)
+                                    {
+                                        runningTasks.Add(table.ExecuteBatchAsync(upserts));
+                                        upserts = new TableBatchOperation();
+                                    }
+                                    break;
+                                case OpType.Delete:
+                                    deletions.Add(TableOperation.Delete(new AzureEntity() { PartitionKey = op.Entity.Partition.ToString(), RowKey = Uri.EscapeDataString(Convert.ToBase64String(op.Entity.Key)), Value = op.Entity.Value }));
+                                    if (deletions.Count == 100)
+                                    {
+                                        runningTasks.Add(table.ExecuteBatchAsync(deletions));
+                                        deletions = new TableBatchOperation();
+                                    }
+                                    break;
                             }
+                            
                         }
                         Func<IEnumerable<string>, string> and = (q) => {
                             string query = null;
@@ -333,5 +347,26 @@ namespace AzureDB
             }
             await Task.WhenAll(ops.Select(m => m.Task.Task));
         }
+
+
+        protected override async Task DeleteEntities(IEnumerable<ScalableEntity> entities)
+        {
+            var ops = entities.Select(m => new AzureOperationHandle(m.SetPartition(optimal_shard_size), OpType.Delete)).ToList();
+            lock (evt)
+            {
+                foreach (var iable in ops)
+                {
+                    if (!pendingOperations.ContainsKey(iable.Entity.Partition))
+                    {
+                        pendingOperations.Add(iable.Entity.Partition, new List<AzureOperationHandle>());
+                    }
+                    pendingOperations[iable.Entity.Partition].Add(iable);
+                }
+
+                evt.Set();
+            }
+            await Task.WhenAll(ops.Select(m => m.Task.Task));
+        }
+
     }
 }
