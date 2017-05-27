@@ -27,6 +27,19 @@ namespace Tester
             {
                 ScalableDb mdb = db;
                 //mdb = new MemoryDb();
+                List<ScalableEntity> ents = new List<ScalableEntity>();
+                Stopwatch pwatch = new Stopwatch();
+                pwatch.Start();
+                await db.Retrieve(null, null, rows => {
+                    lock(ents)
+                    {
+                        ents.AddRange(rows);
+                    }
+                    return true;
+                });
+                pwatch.Stop();
+                Console.WriteLine("Loaded " + ents.Count + " in " + pwatch.Elapsed);
+                ents = null;
                 while (true)
                 {
                     Console.WriteLine("Enter number of entities to test");

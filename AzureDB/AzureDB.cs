@@ -35,6 +35,7 @@ namespace AzureDB
         public ScalableDb.RetrieveCallback callback;
         public byte[] StartRange;
         public byte[] EndRange;
+        public List<ScalableEntity> values = new List<ScalableEntity>();
         public AzureOperationHandle(ScalableEntity entity, OpType type)
         {
             Entity = entity;
@@ -44,6 +45,11 @@ namespace AzureDB
         public AzureOperationHandle SetValue(byte[] value)
         {
             Entity.Value = value;
+            return this;
+        }
+        public AzureOperationHandle AddValue(ScalableEntity value)
+        {
+            values.Add(value);
             return this;
         }
     }
@@ -88,6 +94,7 @@ namespace AzureDB
                     {
                         TableBatchOperation upserts = new TableBatchOperation();
                         Dictionary<ScalableEntity,List<AzureOperationHandle>> retrieves = new Dictionary<ScalableEntity, List<AzureOperationHandle>>(EntityComparer.instance);
+                        Dictionary<ByteRange, List<AzureOperationHandle>> rangeRetrieves = new Dictionary<ByteRange, List<AzureOperationHandle>>();
                         foreach(var op in shard.Value.Where(m=>m.Type == OpType.Upsert))
                         {
                             
@@ -127,8 +134,8 @@ namespace AzureDB
                             }
                             return query;
                         };
-                        Func<Dictionary<ScalableEntity,List<AzureOperationHandle>>,TableContinuationToken,TableQuery<AzureEntity>, Task> runSegmentedQuery = null;
-                        runSegmentedQuery = async (tableops,token, compiledQuery) => {
+                        Func<Dictionary<ScalableEntity,List<AzureOperationHandle>>,Dictionary<ByteRange,List<AzureOperationHandle>>,TableContinuationToken,TableQuery<AzureEntity>, Task> runSegmentedQuery = null;
+                        runSegmentedQuery = async (tableops,rangeops,token, compiledQuery) => {
                             if(compiledQuery == null)
                             {
                                 string query = null;
@@ -143,7 +150,7 @@ namespace AzureDB
                                     }
                                 }
 
-                                foreach(var iable in tableops.Values.SelectMany(m=>m).Where(m=>m.Type == OpType.RangeRetrieve))
+                                foreach(var iable in rangeops.Values.SelectMany(m=>m).Where(m=>m.Type == OpType.RangeRetrieve))
                                 {
                                     string startQuery = null;
                                     string endQuery = null;
@@ -167,35 +174,68 @@ namespace AzureDB
                             foreach (var iable in segment)
                             {
                                 var ent = new ScalableEntity(Convert.FromBase64String(Uri.UnescapeDataString(iable.RowKey)),iable.Value);
-                                finished.AddRange(tableops[ent].Select(m=>m.SetValue(ent.Value)));
+                                if (tableops.ContainsKey(ent))
+                                {
+                                    finished.AddRange(tableops[ent].Select(m => m.SetValue(ent.Value)));
+                                }
+                                if(rangeops.Any())
+                                {
+                                    var range = new ByteRange(iable.Value, iable.Value);
+                                    if (rangeops.ContainsKey(range))
+                                    {
+                                        finished.AddRange(rangeops[range].Select(m=>m.AddValue(new ScalableEntity(Convert.FromBase64String(Uri.UnescapeDataString(iable.RowKey)),iable.Value))));
+                                    }
+                                }
                             }
                             //Combine callbacks for finished queries
                             var callbacks = finished.ToLookup(m => m.callback);
                             foreach(var iable in callbacks)
                             {
-                                if(!iable.Key(iable.Select(m=>m.Entity)))
+                                if (!iable.Key(iable.Where(m=>m.Entity != null).Select(m => m.Entity).Union(iable.SelectMany(m=>m.values),EntityComparer.instance)))
                                 {
                                     iable.AsParallel().ForAll(m => m.Type = OpType.Nop);
                                     compiledQuery = null; //Re-compile query
                                 }
+
                             }
                             if (token != null)
                             {
-                                await runSegmentedQuery(tableops, token, compiledQuery);
+                                await runSegmentedQuery(tableops,rangeops, token, compiledQuery);
                             }
                         };
                         foreach (var op in shard.Value.Where(m=>m.Type == OpType.Retrieve || m.Type == OpType.RangeRetrieve))
                         {
-                            if(!retrieves.ContainsKey(op.Entity))
+                            switch(op.Type)
                             {
-                                retrieves.Add(op.Entity, new List<AzureOperationHandle>());
+                                case OpType.Retrieve:
+                                    if (!retrieves.ContainsKey(op.Entity))
+                                    {
+                                        retrieves.Add(op.Entity, new List<AzureOperationHandle>());
+                                    }
+                                    retrieves[op.Entity].Add(op);
+                                    if (retrieves.Count + rangeRetrieves.Count == 100)
+                                    {
+                                        runningTasks.Add(runSegmentedQuery(retrieves,rangeRetrieves, null, null));
+                                        retrieves = new Dictionary<ScalableEntity, List<AzureOperationHandle>>(EntityComparer.instance);
+                                        rangeRetrieves = new Dictionary<ByteRange, List<AzureOperationHandle>>();
+                                    }
+                                    break;
+                                case OpType.RangeRetrieve:
+                                    var ranger = new ByteRange(op.StartRange,op.EndRange);
+                                    if (!rangeRetrieves.ContainsKey(ranger))
+                                    {
+                                        rangeRetrieves.Add(ranger, new List<AzureOperationHandle>());
+                                    }
+                                    rangeRetrieves[ranger].Add(op);
+                                    if (retrieves.Count + rangeRetrieves.Count == 100)
+                                    {
+                                        runningTasks.Add(runSegmentedQuery(retrieves, rangeRetrieves, null, null));
+                                        retrieves = new Dictionary<ScalableEntity, List<AzureOperationHandle>>(EntityComparer.instance);
+                                        rangeRetrieves = new Dictionary<ByteRange, List<AzureOperationHandle>>();
+                                    }
+                                    break;
                             }
-                            retrieves[op.Entity].Add(op);
-                            if (retrieves.Count == 100)
-                            {
-                                runningTasks.Add(runSegmentedQuery(retrieves,null,null));
-                                retrieves = new Dictionary<ScalableEntity, List<AzureOperationHandle>>(EntityComparer.instance);
-                            }
+                            
                         }
                         foreach(var op in shard.Value.Where(m=>m.Type == OpType.Nop))
                         {
@@ -205,9 +245,9 @@ namespace AzureDB
                         {
                             runningTasks.Add(table.ExecuteBatchAsync(upserts));
                         }
-                        if(retrieves.Any())
+                        if(retrieves.Any() || rangeRetrieves.Any())
                         {  
-                            runningTasks.Add(runSegmentedQuery(retrieves,null,null));
+                            runningTasks.Add(runSegmentedQuery(retrieves,rangeRetrieves,null,null));
                         }
                     }
                     await Task.WhenAll(runningTasks);

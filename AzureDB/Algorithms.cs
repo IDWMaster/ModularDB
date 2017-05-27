@@ -20,6 +20,43 @@ using System.Threading.Tasks;
 
 namespace AzureDB
 {
+    public class ByteRange
+    {
+        byte[] Start;
+        byte[] End;
+        public override int GetHashCode()
+        {
+            return (int)Start.LinearHash();
+        }
+
+        public ByteRange(byte[] start, byte[] end)
+        {
+            Start = start == null ? new byte[0] : start;
+            End = end == null ? new byte[0]:end;
+
+        }
+
+        /// <summary>
+        /// Determines if this Range contains the specified Range
+        /// </summary>
+        /// <param name="obj"></param>
+        /// <returns></returns>
+        public override bool Equals(object obj)
+        {
+            ByteRange other = obj as ByteRange;
+            if(other == null)
+            {
+                return false;
+            }
+            if(ByteComparer.instance.Compare(Start,other.Start)>=0 && ByteComparer.instance.Compare(End,other.End)<=0)
+            {
+                return true;
+            }
+            return false;
+        }
+    }
+
+
     public class ByteComparer : IEqualityComparer<byte[]>, IComparer<byte[]>
     {
        public static ByteComparer instance = new ByteComparer();
