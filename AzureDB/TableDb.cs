@@ -192,6 +192,8 @@ namespace AzureDB
             });
         }
 
+        
+
 
         public Task Retrieve<T>(IEnumerable<object> keys, TypedRetrieveCallback<T> callback) where T : class, new()
         {
@@ -229,6 +231,19 @@ namespace AzureDB
                 return new ScalableEntity(me, mstream.ToArray());
             }));
         }
+
+        public async Task Delete(IEnumerable<byte[]> rows)
+        {
+
+            await db.Delete(rows.Select(key => {
+                byte[] me = new byte[key.Length + tableName.Length];
+                Buffer.BlockCopy(tableName, 0, me, 0, tableName.Length);
+                Buffer.BlockCopy(key, 0, me, tableName.Length, key.Length);
+                return me;
+            }));
+        }
+
+
     }
     /// <summary>
     /// Table-driven database class
