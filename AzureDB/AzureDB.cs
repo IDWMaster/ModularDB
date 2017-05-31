@@ -21,6 +21,8 @@ using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Table;
 using Microsoft.WindowsAzure.Storage.Auth;
 using System.Threading;
+using Microsoft.WindowsAzure.Storage.Queue;
+
 namespace AzureDB
 {
     enum OpType
@@ -61,8 +63,37 @@ namespace AzureDB
             ETag = "*";
         }
     }
+
+    class AzureQueue:ScalableQueue
+    {
+        CloudQueue queue;
+
+        public AzureQueue(CloudQueue q)
+        {
+            queue = q;
+        }
+        static Guid ian = Guid.NewGuid();
+        public override void CompleteMessage(ScalableMessage message)
+        {
+            throw new NotImplementedException();
+        }
+        public override Task SendMessage(ScalableMessage msg)
+        {
+            queue.
+        }
+        public override Guid ID => ian;
+    }
+
+
     public class AzureDatabase:ScalableDb
     {
+
+        protected override Task<ScalableQueue> AcquireQueue(byte[] id)
+        {
+            
+        }
+
+        CloudQueueClient qclient;
         CloudTableClient client;
         CloudTable table;
         Dictionary<ulong, List<AzureOperationHandle>> pendingOperations = new Dictionary<ulong, List<AzureOperationHandle>>();
@@ -71,7 +102,9 @@ namespace AzureDB
         System.Threading.Thread mthread;
         public AzureDatabase(string storageAccountString, string tableName)
         {
+            
             CloudStorageAccount account = CloudStorageAccount.Parse(storageAccountString);
+            qclient = account.CreateCloudQueueClient();
             client = account.CreateCloudTableClient();
             client.DefaultRequestOptions.PayloadFormat = TablePayloadFormat.JsonNoMetadata;
             table = client.GetTableReference(tableName);

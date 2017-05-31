@@ -101,6 +101,9 @@ namespace AzureDB
                 case "__tables":
                     initialized = true;
                     break;
+                case "__indices":
+                    initialized = true;
+                    break;
                 default:
                     break;
             }
@@ -192,14 +195,44 @@ namespace AzureDB
             });
         }
 
-        
+
+        async Task RetrieveDirect(byte[] start, byte[] end, TypedRetrieveCallback<TableRow> callback)
+        {
+            //TODO: Check for range index
+
+
+
+
+            await db.Retrieve(start,end, elems => {
+                return callback(elems.Select(m => {
+                    byte[] newkey = new byte[m.Key.Length - tableName.Length];
+                    Buffer.BlockCopy(m.Key, tableName.Length, newkey, 0, newkey.Length);
+                    m.Key = newkey;
+
+                    TableRow retval = new TableRow();
+                    BinaryReader mreader = new BinaryReader(new MemoryStream(m.Value));
+                    retval.Key = m.Key;
+                    while (mreader.BaseStream.Position != mreader.BaseStream.Length)
+                    {
+                        retval[mreader.ReadNullTerminatedString()] = DataFormats.Deserialize(mreader);
+                    }
+                    return retval;
+                }));
+            });
+        }
+
 
 
         public Task Retrieve<T>(IEnumerable<object> keys, TypedRetrieveCallback<T> callback) where T : class, new()
         {
             return Retrieve(keys, rows=>callback(rows.Select(m=>m.As<T>())));
         }
-        
+
+        public Task Delete(IEnumerable<object> keys)
+        {
+            return Delete(keys.Select(m => m.GetType() == typeof(byte[]) ? m as byte[] : m.Serialize()));
+        }
+
 
 
         public Task Upsert<T>(params T[] rows)

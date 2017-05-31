@@ -49,55 +49,7 @@ namespace AzureDB
         }
     }
     
-    public abstract class ScalableLock:IDisposable
-    {
-        #region IDisposable Support
-        private bool disposedValue = false; // To detect redundant calls
-
-        protected virtual void Dispose(bool disposing)
-        {
-            if (!disposedValue)
-            {
-                if (disposing)
-                {
-
-                }
-                
-                disposedValue = true;
-            }
-        }
-        
-        public void Dispose()
-        {
-            Dispose(true);
-        }
-        #endregion
-
-    }
-
-    class DefaultNetworkLock:ScalableLock
-    {
-        public uint LockID;
-        public HashSet<byte[]> rows = new HashSet<byte[]>(ByteComparer.instance);
-
-    }
-    class LockComparer : IEqualityComparer<DefaultNetworkLock>
-    {
-        public static LockComparer Instance = new LockComparer();
-        public bool Equals(DefaultNetworkLock x, DefaultNetworkLock y)
-        {
-            if(x.LockID == y.LockID)
-            {
-                return true;
-            }
-            return x.rows.Where(m=>y.rows.Contains(m)).Any();
-        }
-
-        public int GetHashCode(DefaultNetworkLock obj)
-        {
-            return (int)obj.rows.SelectMany(m => m).ToList().ToArray().Hash();
-        }
-    }
+    
     public abstract class ScalableDb:IDisposable
     {
         //Database design for scalable architecture
@@ -110,6 +62,13 @@ namespace AzureDB
         {
             
         }
+
+        /// <summary>
+        /// Acquires a message queue with the specified ID
+        /// </summary>
+        /// <param name="id">The ID of the queue to acquire</param>
+        /// <returns></returns>
+        protected abstract Task<ScalableQueue> AcquireQueue(byte[] id);
 
         protected abstract Task DeleteEntities(IEnumerable<ScalableEntity> entities);
 
