@@ -62,13 +62,7 @@ namespace AzureDB
         {
             
         }
-
-        /// <summary>
-        /// Acquires a message queue with the specified ID
-        /// </summary>
-        /// <param name="id">The ID of the queue to acquire</param>
-        /// <returns></returns>
-        protected abstract Task<ScalableQueue> AcquireQueue(byte[] id);
+        
 
         protected abstract Task DeleteEntities(IEnumerable<ScalableEntity> entities);
 
