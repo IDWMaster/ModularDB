@@ -75,6 +75,7 @@
     <Compile Include="AzureDB.cs" />
     <Compile Include="DataFormats.cs" />
     <Compile Include="MemoryDb.cs" />
+    <Compile Include="P2PQueue.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ScalableDb.cs" />
     <Compile Include="ScalableQueue.cs" />

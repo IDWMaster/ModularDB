@@ -119,31 +119,17 @@ namespace QueueServer
                         using (client)
                         {
                             var str = client.GetStream();
-                            List<Task> pendingTasks = new List<Task>();
                             HashSet<byte[]> associations = new HashSet<byte[]>();
                             Server server = new Server();
                             try
                             {
                                 while (true)
                                 {
-                                    Task<byte[]> recvTask = str.ReceivePacket();
-                                    pendingTasks.Add(recvTask);
-                                    await Task.WhenAny(pendingTasks);
-                                    foreach(var iable in pendingTasks)
-                                    {
-                                        if(iable.IsCompleted)
-                                        {
-                                            pendingTasks.Remove(iable);
-                                        }
-                                    }
+                                    
 
 
-                                    if(!recvTask.IsCompleted)
-                                    {
-                                        continue; //No new packets; continue execution.
-                                    }
-
-                                    BinaryReader mreader = new BinaryReader(new MemoryStream(recvTask.Result));
+                                    
+                                    BinaryReader mreader = new BinaryReader(new MemoryStream(await str.ReceivePacket()));
                                     byte[] q;
                                     switch (mreader.ReadByte())
                                     {
@@ -171,7 +157,7 @@ namespace QueueServer
                                             {
                                                 rq = queues[q];
                                             }
-                                            pendingTasks.Add(rq.PostMessage(new Message() { Value = mreader.ReadBytes(mreader.ReadInt32()) }));
+                                            await rq.PostMessage(new Message() { Value = mreader.ReadBytes(mreader.ReadInt32()) });
                                             break;
                                     }
                                 }

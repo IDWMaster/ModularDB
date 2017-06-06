@@ -31,7 +31,7 @@ namespace AzureDB
     /// A posted message can either succeed (completely) or fail for all members.
     /// If it fails on a particular server, that server should be shut down and removed from the network.
     /// </summary>
-    public abstract class ScalableQueue
+    public abstract class ScalableQueue:IDisposable
     {
         public event Action<ScalableMessage> onMessageReceived;
 
@@ -65,5 +65,26 @@ namespace AzureDB
         /// to this queue, but is not guaranteed to be persisted.
         /// </summary>
         public abstract Guid ID { get; }
+
+        #region IDisposable Support
+        protected bool disposedValue = false; // To detect redundant calls
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposedValue)
+            {
+
+                disposedValue = true;
+            }
+        }
+        
+
+        // This code added to correctly implement the disposable pattern.
+        public void Dispose()
+        {
+            Dispose(true);
+            
+        }
+        #endregion
     }
 }

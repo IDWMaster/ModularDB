@@ -44,7 +44,7 @@ namespace AzureDB
             }
             return retval;
         }
-
+        internal bool UseLinearHash = false;
         public T As<T>() where T:class,new()
         {
             T retval = new T();
@@ -233,8 +233,7 @@ namespace AzureDB
             return Delete(keys.Select(m => m.GetType() == typeof(byte[]) ? m as byte[] : m.Serialize()));
         }
 
-
-
+        
         public Task Upsert<T>(params T[] rows)
         {
             return Upsert(rows as IEnumerable<T>);
@@ -261,7 +260,7 @@ namespace AzureDB
                 Buffer.BlockCopy(tableName, 0, me, 0, tableName.Length);
                 Buffer.BlockCopy(key, 0, me, tableName.Length, key.Length);
 
-                return new ScalableEntity(me, mstream.ToArray());
+                return new ScalableEntity(me, mstream.ToArray()) { UseLinearHash = m.UseLinearHash };
             }));
         }
 
