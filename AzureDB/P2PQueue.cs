@@ -27,11 +27,13 @@ namespace AzureDB
             initTask = Initialize(name,db,hostname,port,timeout);
         }
         byte[] name;
+        byte[] nameEnd;
         byte[] entry;
         TableDb db;
         bool running = true;
         Dictionary<IPEndPoint, TaskCompletionSource<bool>> pendingPings = new Dictionary<IPEndPoint, TaskCompletionSource<bool>>();
         Dictionary<Guid, TaskCompletionSource<bool>> pendingPingRequests = new Dictionary<Guid, TaskCompletionSource<bool>>();
+        Dictionary<Guid, TaskCompletionSource<bool>> pendingMessages = new Dictionary<Guid, TaskCompletionSource<bool>>();
         async Task<bool> Ping(IPEndPoint ep)
         {
             TaskCompletionSource<bool> a = new TaskCompletionSource<bool>();
@@ -54,10 +56,13 @@ namespace AzureDB
         {
             this.timeout = timeout;
             this.name = name;
+            nameEnd = new byte[name.Length + 1];
+            nameEnd[name.Length] = 1;
             this.db = db;
             entry = new byte[name.Length + 16];
             Buffer.BlockCopy(name, 0, entry, 0, name.Length);
             Buffer.BlockCopy(id.ToByteArray(), 0, entry, name.Length, 16);
+            
 
             var row = TableRow.From(new { Key = entry, Hostname = hostname, port = port });
             row.UseLinearHash = true;
@@ -114,6 +119,10 @@ namespace AzureDB
                                 }
                                 msrc?.SetResult(true);
                                 break;
+                            case 4:
+                                //Message
+                                NtfyMessage(new ScalableMessage() { From = new Guid(mreader.ReadBytes(16)), ID = new Guid(mreader.ReadBytes(16)), Message = mreader.ReadBytes(mreader.ReadInt32()) });
+                                break;
                         }
                     }catch(Exception er)
                     {
@@ -148,13 +157,45 @@ namespace AzureDB
             throw new NotImplementedException();
         }
         
+        async Task SendToServer(TableRow server, byte[] msg, Guid msgId)
+        {
 
+        }
         public override async Task SendMessage(ScalableMessage msg)
         {
             await initTask;
-          //  await db["__queues"].Retrieve()
+            List<TableRow> servers = new List<TableRow>();
+            await db["__queues"].RangeRetrieve(name,nameEnd,_servers=> {
+                lock(servers)
+                {
+                    servers.AddRange(_servers);
+                }
+                return true;
+            });
+            byte[] buffy = new byte[1 + 16 + 16 + 4 + msg.Message.Length];
+            buffy[0] = 4;
+            Buffer.BlockCopy(id.ToByteArray(), 0, buffy, 1, 16);
+            Buffer.BlockCopy(msg.ID.ToByteArray(), 0, buffy, 1 + 16, 16);
+            Buffer.BlockCopy(BitConverter.GetBytes(msg.Message.Length),0,buffy,1+16+16,4);
+            Buffer.BlockCopy(msg.Message, 0, buffy, 1 + 16 + 16+4, msg.Message.Length);
+            foreach (TableRow boat in servers)
+            {
+                await mclient.SendAsync(buffy, buffy.Length, boat["Hostname"] as string, (int)boat["port"]);
+            }
+            var tsktsktsktsk = new TaskCompletionSource<bool>();
+            lock (pendingMessages)
+            {
+                pendingMessages.Add(msg.ID, tsktsktsktsk);
+            }
+            await Task.WhenAny(tsktsktsktsk.Task, Task.Delay(timeout));
+            lock(pendingMessages)
+            {
+                pendingMessages.Remove(msg.ID);
+            }
+            if (!tsktsktsktsk.Task.IsCompleted)
+            {
 
-            throw new NotImplementedException();
+            }
         }
     }
 }

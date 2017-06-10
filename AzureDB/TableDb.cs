@@ -166,13 +166,19 @@ namespace AzureDB
         public Task Retrieve(IEnumerable<object> keys, TypedRetrieveCallback<TableRow> callback)
         {
             //Compute direct keys
-            List<byte[]> directKeys = keys.Select(m => m.GetType() == typeof(byte[]) ? m as byte[] : m.Serialize()).Select(m=>{
-                byte[] me = new byte[tableName.Length + m.Length];
-                Buffer.BlockCopy(tableName, 0, me, 0, tableName.Length);
-                Buffer.BlockCopy(m, 0, me, tableName.Length, m.Length);
-                return me;
+            List<byte[]> directKeys = keys.Select(m => m.GetType() == typeof(byte[]) ? m as byte[] : m.Serialize()).Select(m =>
+            {
+                return GenerateKey(m);
             }).ToList();
             return RetrieveDirect(directKeys,callback);
+        }
+
+        private byte[] GenerateKey(byte[] m)
+        {
+            byte[] me = new byte[tableName.Length + m.Length];
+            Buffer.BlockCopy(tableName, 0, me, 0, tableName.Length);
+            Buffer.BlockCopy(m, 0, me, tableName.Length, m.Length);
+            return me;
         }
 
         async Task RetrieveDirect(IEnumerable<byte[]> keys, TypedRetrieveCallback<TableRow> callback)
@@ -196,10 +202,13 @@ namespace AzureDB
         }
 
 
+        internal Task RangeRetrieve(byte[] start, byte[] end, TypedRetrieveCallback<TableRow> callback)
+        {
+            return RetrieveDirect(GenerateKey(start), GenerateKey(end), callback);
+        }
+
         async Task RetrieveDirect(byte[] start, byte[] end, TypedRetrieveCallback<TableRow> callback)
         {
-            //TODO: Check for range index
-
 
 
 
