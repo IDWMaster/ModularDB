@@ -101,9 +101,6 @@ namespace AzureDB
                 case "__tables":
                     initialized = true;
                     break;
-                case "__indices":
-                    initialized = true;
-                    break;
                 default:
                     break;
             }
@@ -115,7 +112,8 @@ namespace AzureDB
         {
             if(!initialized)
             {
-                await tdb["__tables"].Upsert(new { Key = tableName });
+                TableRow row = new TableRow() { UseLinearHash = true, Key = tableName };
+                await tdb["__tables"].Upsert(row);
                 initialized = true;
             }
         }

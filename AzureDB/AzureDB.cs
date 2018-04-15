@@ -63,35 +63,12 @@ namespace AzureDB
             ETag = "*";
         }
     }
-
-    class AzureQueue:ScalableQueue
-    {
-        CloudQueue queue;
-
-        public AzureQueue(CloudQueue q)
-        {
-            queue = q;
-        }
-        static Guid ian = Guid.NewGuid();
-        public override void CompleteMessage(ScalableMessage message)
-        {
-            throw new NotImplementedException();
-        }
-        public override Task SendMessage(ScalableMessage msg)
-        {
-            queue.
-        }
-        public override Guid ID => ian;
-    }
+    
 
 
     public class AzureDatabase:ScalableDb
     {
-
-        protected override Task<ScalableQueue> AcquireQueue(byte[] id)
-        {
-            
-        }
+        
 
         CloudQueueClient qclient;
         CloudTableClient client;

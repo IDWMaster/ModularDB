@@ -10,7 +10,7 @@ namespace AzureDB
 {
 
     /// <summary>
-    /// P2P decentralized queue
+    /// P2P decentralized queue (NOT YET IMPLEMENTED -- Do not use yet)
     /// The database will store a list of all members of the queue
     /// If an attempt to contact a node fails; the node shall contact all other members of the queue to see if those nodes can contact the affected node.
     /// This can be used to detect network partitions. If any other server is able to contact the affected node; the system will keep trying to connect
