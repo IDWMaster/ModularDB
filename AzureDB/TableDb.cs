@@ -81,6 +81,8 @@ namespace AzureDB
         TableDb tdb;
         byte[] tableName;
         string name;
+
+        internal bool UseLinearHash = false;
         public string Name
         {
             get
@@ -90,7 +92,7 @@ namespace AzureDB
         }
         public delegate bool TypedRetrieveCallback<T>(IEnumerable<T> entities);
         const char nextChar = (char)('_' + 1);
-        internal Table(TableDb tdb,ScalableDb db, string table)
+        internal Table(TableDb tdb,ScalableDb db, string table, bool useLinearHash = false)
         {
             tableName = Encoding.UTF8.GetBytes(table+"_");
             this.db = db;
@@ -227,12 +229,23 @@ namespace AzureDB
                 }));
             });
         }
-
-
+        
 
         public Task Retrieve<T>(IEnumerable<object> keys, TypedRetrieveCallback<T> callback) where T : class, new()
         {
             return Retrieve(keys, rows=>callback(rows.Select(m=>m.As<T>())));
+        }
+
+
+        public Task Retrieve(object start, object end, TypedRetrieveCallback<TableRow> callback)
+        {
+            byte[] _start = start.GetType() == typeof(byte[]) ? start as byte[] : start.Serialize();
+            byte[] _end = end.GetType() == typeof(byte[]) ? end as byte[] : end.Serialize();
+            return RangeRetrieve(_start, _end, callback);
+        }
+        public Task Retrieve<T>(object start, object end, TypedRetrieveCallback<T> callback) where T : class, new()
+        {
+            return Retrieve(start,end, rows => callback(rows.Select(m=>m.As<T>())));
         }
 
         public Task Delete(IEnumerable<object> keys)
@@ -251,6 +264,7 @@ namespace AzureDB
             return Upsert(rows.Select(row => TableRow.From(row)));
         }
 
+        
         public async Task Upsert(IEnumerable<TableRow> rows)
         {
 
@@ -266,7 +280,10 @@ namespace AzureDB
                 byte[] me = new byte[key.Length + tableName.Length];
                 Buffer.BlockCopy(tableName, 0, me, 0, tableName.Length);
                 Buffer.BlockCopy(key, 0, me, tableName.Length, key.Length);
-
+                if(this.UseLinearHash)
+                {
+                    m.UseLinearHash = true;
+                }
                 return new ScalableEntity(me, mstream.ToArray()) { UseLinearHash = m.UseLinearHash };
             }));
         }
@@ -281,8 +298,7 @@ namespace AzureDB
                 return me;
             }));
         }
-
-
+        
     }
     /// <summary>
     /// Table-driven database class
@@ -295,7 +311,7 @@ namespace AzureDB
             this.db = db;
         }
 
-        public Table this[string name]
+        public virtual Table this[string name]
         {
             get
             {
@@ -327,4 +343,49 @@ namespace AzureDB
         #endregion
 
     }
+
+    /// <summary>
+    /// Table-driven database class
+    /// </summary>
+    public class RangedTableDb : TableDb
+    {
+        ScalableDb db;
+        public RangedTableDb(ScalableDb db):base(db)
+        {
+            this.db = db;
+        }
+
+        public override Table this[string name]
+        {
+            get
+            {
+                return new Table(this, db, name, true);
+            }
+        }
+
+
+        #region IDisposable Support
+        private bool disposedValue = false; // To detect redundant calls
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposedValue)
+            {
+                if (disposing)
+                {
+                    db.Dispose();
+                }
+
+                disposedValue = true;
+            }
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+        }
+        #endregion
+
+    }
+
 }
