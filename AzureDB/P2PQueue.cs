@@ -6,196 +6,278 @@ using System.Threading.Tasks;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading;
 namespace AzureDB
 {
+    class PeerInformation
+    {
+        public IPEndPoint ep;
+        public Dictionary<string, int> subscriptions = new Dictionary<string, int>();
+        public void Start(int bytesSent)
+        {
+            this.bytesSent = bytesSent;
+            initialTimer.Start();
+        }
+        public void Stop()
+        {
+            initialTimer.Stop();
+        }
+        public TimeSpan GetTimeoutInterval(int bytes)
+        {
+            long tval = initialTimer.ElapsedMilliseconds;
+            if(tval == 0)
+            {
+                tval = 4;
+            }
+            tval *= 2; //Round-trip time
+            if(bytes<bytesSent)
+            {
+                bytes = bytesSent+1;
+            }
+            var retval = TimeSpan.FromTicks((bytes-bytesSent)*(initialTimer.ElapsedTicks*2));
+            return retval;
+        }
+        int bytesSent;
+        System.Diagnostics.Stopwatch initialTimer = new System.Diagnostics.Stopwatch();
+    }
 
     /// <summary>
-    /// P2P decentralized queue (NOT YET IMPLEMENTED -- Do not use yet)
-    /// The database will store a list of all members of the queue
-    /// If an attempt to contact a node fails; the node shall contact all other members of the queue to see if those nodes can contact the affected node.
-    /// This can be used to detect network partitions. If any other server is able to contact the affected node; the system will keep trying to connect
-    /// until no other nodes are able to reach the affected host.
-    /// If no nodes are able to reach the affected host; the system shall remove
-    /// the affected node from the database, marking it as offline.
+    /// P2P decentralized queue via UDP
     /// </summary>
-    class P2PQueue : ScalableQueue
+    public class P2PQueue : ScalableQueue
     {
+
         UdpClient mclient;
+        Dictionary<Guid, PeerInformation> peers = new Dictionary<Guid, PeerInformation>();
+        HashSet<string> subscriptions = new HashSet<string>();
+        object workevt_sync = new object();
+        TaskCompletionSource<bool> workevt = new TaskCompletionSource<bool>();
+        object work_sync = new object();
+        Queue<Func<Task>> work = new Queue<Func<Task>>();
+
+        void QueueWork(Func<Task> function)
+        {
+            lock(work_sync)
+            {
+                work.Enqueue(function);
+            }
+            lock(workevt_sync)
+            {
+                workevt.SetResult(true);
+            }
+        }
         Task initTask;
-        public P2PQueue(byte[] name, TableDb db, string hostname, int port, TimeSpan timeout)
-        {
-            initTask = Initialize(name,db,hostname,port,timeout);
-        }
-        byte[] name;
-        byte[] nameEnd;
-        byte[] entry;
-        TableDb db;
         bool running = true;
-        Dictionary<IPEndPoint, TaskCompletionSource<bool>> pendingPings = new Dictionary<IPEndPoint, TaskCompletionSource<bool>>();
-        Dictionary<Guid, TaskCompletionSource<bool>> pendingPingRequests = new Dictionary<Guid, TaskCompletionSource<bool>>();
-        Dictionary<Guid, TaskCompletionSource<bool>> pendingMessages = new Dictionary<Guid, TaskCompletionSource<bool>>();
-        async Task<bool> Ping(IPEndPoint ep)
+        async Task UpdateSubscriptions(Guid peer)
         {
-            TaskCompletionSource<bool> a = new TaskCompletionSource<bool>();
-            lock(pendingPings)
-            {
-                pendingPings.Add(ep, a); //EPA! EEEPAAA!
-            }
-            await mclient.SendAsync(new byte[] { 0 }, 1,ep);
 
-            await Task.WhenAny(Task.Delay(timeout),a.Task);
-            lock(pendingPings)
-            {
-                pendingPings.Remove(ep);
-            }
-            return a.Task.IsCompleted;
-            
         }
-        TimeSpan timeout;
-        async Task Initialize(byte[] name, TableDb db, string hostname, int port, TimeSpan timeout)
+        public P2PQueue(string hostname, int port)
         {
-            this.timeout = timeout;
-            this.name = name;
-            nameEnd = new byte[name.Length + 1];
-            nameEnd[name.Length] = 1;
-            this.db = db;
-            entry = new byte[name.Length + 16];
-            Buffer.BlockCopy(name, 0, entry, 0, name.Length);
-            Buffer.BlockCopy(id.ToByteArray(), 0, entry, name.Length, 16);
-            
-
-            var row = TableRow.From(new { Key = entry, Hostname = hostname, port = port });
-            row.UseLinearHash = true;
-
-            mclient = new UdpClient(new IPEndPoint(IPAddress.Any, port));
-            Action recvLoop = async () => {
-                while(running)
+            mclient = new UdpClient(AddressFamily.InterNetworkV6);
+            mclient.Client.SetSocketOption(SocketOptionLevel.IPv6, SocketOptionName.IPv6Only, false);
+            try
+            {
+                mclient.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, port));
+            }catch(Exception er)
+            {
+                mclient.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, 0));
+            }
+            TaskCompletionSource<bool> source = new TaskCompletionSource<bool>();
+            initTask = source.Task;
+            Action item = async () => {
+                try
                 {
-                    try
+                    Queue<UdpReceiveResult> pendingPackets = new Queue<UdpReceiveResult>();
+                    byte[] regPacket = new byte[1 + 16];
+                    Buffer.BlockCopy(id.ToByteArray(), 0, regPacket, 1, 16);
+                    while (running)
                     {
-                        var packet = await mclient.ReceiveAsync(); //Receive a sink.
-                        BinaryReader mreader = new BinaryReader(new MemoryStream(packet.Buffer));
+                        await mclient.SendAsync(regPacket, regPacket.Length, hostname, port);
+                        Task<UdpReceiveResult> recvTask = mclient.ReceiveAsync();
+                        if (await Task.WhenAny(Task.Delay(1000), recvTask) == recvTask)
+                        {
+                            MemoryStream mstream = new MemoryStream(recvTask.Result.Buffer);
+                            BinaryReader mreader = new BinaryReader(mstream);
+                            switch (mreader.ReadByte())
+                            {
+                                case 0:
+                                    if (new Guid(mreader.ReadBytes(16)) == ID)
+                                    {
+                                        source.SetResult(true);
+                                        goto velociraptor;
+                                    }else
+                                    {
+                                        pendingPackets.Enqueue(recvTask.Result);
+                                    }
+                                    break;
+                                case 1:
+                                    {
+                                        await UpdatePeerlist(recvTask.Result, mreader);
+                                        source.SetResult(true);
+                                        goto velociraptor;
+                                    }
+                                default:
+                                    pendingPackets.Enqueue(recvTask.Result);
+                                    break;
+                            }
+                        }
+                    }
+                    velociraptor:
+                    while(running)
+                    {
+                        //Contains 1 msg
+                        UdpReceiveResult msgs;
+                        if (pendingPackets.Any())
+                        {
+                            msgs = pendingPackets.Dequeue();
+                        }
+                        else
+                        {
+                           var recvTask = mclient.ReceiveAsync();
+                            dengo:
+                            var result = Task.WhenAny(recvTask, workevt.Task);
+                            if(result.Result == workevt.Task)
+                            {
+                                lock(workevt_sync)
+                                {
+                                    workevt = new TaskCompletionSource<bool>();
+                                }
+                                Queue<Func<Task>> work = null;
+                                lock(work_sync)
+                                {
+                                    work = this.work;
+                                    this.work = new Queue<Func<Task>>();
+                                }
+                                //Perform work within this context
+                                foreach(var iable in work)
+                                {
+                                    await iable();
+                                }
+                                goto dengo;
+                            }
+                            msgs = recvTask.Result;
+                        }
+                        BinaryReader mreader = new BinaryReader(new MemoryStream(msgs.Buffer));
                         switch(mreader.ReadByte())
                         {
                             case 0:
-                                //Ping request
-                                await mclient.SendAsync(new byte[] { 1 }, 1, packet.RemoteEndPoint);
+                                {
+                                    //New peer found
+                                    Guid ian = new Guid(mreader.ReadBytes(16));
+                                    if(ian == id)
+                                    {
+                                        break;
+                                    }
+                                    if(peers.ContainsKey(ian))
+                                    {
+                                        break;
+                                    }
+                                    peers[ian] = new PeerInformation() { ep = msgs.RemoteEndPoint };
+                                    NtfyPeer(ian);
+                                    //Reply with peerlist and update subscriptions (NOTE: In-order delivery is NOT guaranteed here)
+                                    byte[] me = new byte[1 + 16+((16+8+2)*peers.Count)];
+                                    me[0] = 1;
+                                    Buffer.BlockCopy(ID.ToByteArray(), 0, me, 1, 16);
+                                    int i = 0;
+                                    foreach (var iable in peers)
+                                    {
+                                        var baseoffset = (1 + 16 + ((16 + 8 + 2) * i));
+                                        Buffer.BlockCopy(iable.Key.ToByteArray(), 0, me, baseoffset, 16);
+                                        Buffer.BlockCopy(iable.Value.ep.Address.GetAddressBytes(), 0, me, baseoffset + 16, 8);
+                                        Buffer.BlockCopy(BitConverter.GetBytes((ushort)iable.Value.ep.Port), 0, me, baseoffset + 16+8, 2);
+
+                                        i++;
+                                    }
+                                    await mclient.SendAsync(me, me.Length, msgs.RemoteEndPoint);
+                                    await UpdateSubscriptions(ian);
+                                }
                                 break;
                             case 1:
-                                //Ping response
-                                TaskCompletionSource<bool> msrc = null;
-                                lock(pendingPings)
                                 {
-                                    if(pendingPings.ContainsKey(packet.RemoteEndPoint))
-                                    {
-                                        msrc = pendingPings[packet.RemoteEndPoint];
-                                        pendingPings.Remove(packet.RemoteEndPoint);
-                                    }
+                                    await UpdatePeerlist(msgs, mreader);
                                 }
-                                msrc?.SetResult(true);
-                                break;
-                            case 2:
-                                //Ping endpoint request
-                                if(await Ping(new IPEndPoint(new IPAddress(mreader.ReadBytes(4)),mreader.ReadInt32())))
-                                {
-                                    byte[] me = new byte[17];
-                                    me[0] = 3;
-                                    Buffer.BlockCopy(mreader.ReadBytes(16), 0, me, 1, 16);
-                                    await mclient.SendAsync(me, me.Length,packet.RemoteEndPoint);
-                                }
-                                break;
-                            case 3:
-                                //Ping endpoint response
-                                msrc = null;
-                                Guid ian = new Guid(mreader.ReadBytes(16));
-                                lock (pendingPingRequests)
-                                {
-
-                                    if(pendingPingRequests.ContainsKey(ian))
-                                    {
-                                        msrc = pendingPingRequests[ian];
-                                        pendingPingRequests.Remove(ian);
-                                    }
-                                }
-                                msrc?.SetResult(true);
-                                break;
-                            case 4:
-                                //Message
-                                NtfyMessage(new ScalableMessage() { From = new Guid(mreader.ReadBytes(16)), ID = new Guid(mreader.ReadBytes(16)), Message = mreader.ReadBytes(mreader.ReadInt32()) });
                                 break;
                         }
-                    }catch(Exception er)
-                    {
-
                     }
+                }catch(Exception er)
+                {
+
                 }
             };
-
-            await db["__queues"].Upsert(row);
+            item();
         }
 
-
-
+        private async Task UpdatePeerlist(UdpReceiveResult data, BinaryReader mreader)
+        {
+            //New peerlist
+            Guid ian = new Guid(mreader.ReadBytes(16));
+            if (ian != ID)
+            {
+                if(!peers.ContainsKey(ian))
+                {
+                    peers[ian] = new PeerInformation() { ep = data.RemoteEndPoint };
+                    await UpdateSubscriptions(ian);
+                    NtfyPeer(ian);
+                }
+            }
+            while (mreader.BaseStream.Length != mreader.BaseStream.Position)
+            {
+                ian = new Guid(mreader.ReadBytes(16));
+                var pi = new PeerInformation() { ep = new IPEndPoint(new IPAddress(mreader.ReadBytes(8)), mreader.ReadUInt16()) }; ;
+                if (ian != ID && !peers.ContainsKey(ian))
+                {
+                    peers[ian] = pi;
+                    await UpdateSubscriptions(ian);
+                    NtfyPeer(ian);
+                }
+            }
+        }
 
         Guid id = Guid.NewGuid();
         public override Guid ID => id;
 
+        public override async Task CompleteMessage(ScalableMessage message)
+        {
+            await initTask;
+            throw new NotImplementedException();
+        }
+
+        public override async Task SendMessage(ScalableMessage msg)
+        {
+            await initTask;
+            throw new NotImplementedException();
+        }
+        public override async Task Subscribe(string topic)
+        {
+            await initTask;
+            TaskCompletionSource<bool> src = new TaskCompletionSource<bool>();
+            QueueWork(async() => {
+                subscriptions.Add(topic);
+                foreach(var iable in peers)
+                {
+                    //NOTE: This is to avoid flooding the network (wait for each request before moving to the next one)
+                    //In a really large cluster; this is pretty important.
+                    await UpdateSubscriptions(iable.Key);
+                }
+                src.SetResult(true);
+            });
+            await src.Task;
+        }
+
+        public override async Task Unsubscribe(string topic)
+        {
+            await initTask;
+            throw new NotImplementedException();
+        }
         protected override void Dispose(bool disposing)
         {
             if(disposing)
             {
-                db["__queues"].Delete(new byte[][] { entry }).ContinueWith(tsk => {
-                    running = false;
-                    mclient.Close();
-                });
+                running = false;
+                mclient.Close();
             }
             base.Dispose(disposing);
-        }
-
-        public override async Task CompleteMessage(ScalableMessage message)
-        {
-            throw new NotImplementedException();
-        }
-        
-        async Task SendToServer(TableRow server, byte[] msg, Guid msgId)
-        {
-
-        }
-        public override async Task SendMessage(ScalableMessage msg)
-        {
-            await initTask;
-            List<TableRow> servers = new List<TableRow>();
-            await db["__queues"].RangeRetrieve(name,nameEnd,_servers=> {
-                lock(servers)
-                {
-                    servers.AddRange(_servers);
-                }
-                return true;
-            });
-            byte[] buffy = new byte[1 + 16 + 16 + 4 + msg.Message.Length];
-            buffy[0] = 4;
-            Buffer.BlockCopy(id.ToByteArray(), 0, buffy, 1, 16);
-            Buffer.BlockCopy(msg.ID.ToByteArray(), 0, buffy, 1 + 16, 16);
-            Buffer.BlockCopy(BitConverter.GetBytes(msg.Message.Length),0,buffy,1+16+16,4);
-            Buffer.BlockCopy(msg.Message, 0, buffy, 1 + 16 + 16+4, msg.Message.Length);
-            foreach (TableRow boat in servers)
-            {
-                await mclient.SendAsync(buffy, buffy.Length, boat["Hostname"] as string, (int)boat["port"]);
-            }
-            var tsktsktsktsk = new TaskCompletionSource<bool>();
-            lock (pendingMessages)
-            {
-                pendingMessages.Add(msg.ID, tsktsktsktsk);
-            }
-            await Task.WhenAny(tsktsktsktsk.Task, Task.Delay(timeout));
-            lock(pendingMessages)
-            {
-                pendingMessages.Remove(msg.ID);
-            }
-            if (!tsktsktsktsk.Task.IsCompleted)
-            {
-
-            }
         }
     }
 }

@@ -136,7 +136,7 @@ namespace AzureDB
             int count = array.Length >= sizeof(ulong) ? sizeof(ulong) : array.Length;
             for(int i = 0;i<count;i++)
             {
-                forme |= (ulong)(array[i] << ((sizeof(ulong)-i-1)*8));
+                forme |= ((ulong)array[i] << ((sizeof(ulong)-i-1)*8));
             }
             
             return forme;

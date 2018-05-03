@@ -45,6 +45,7 @@ namespace AzureDB.Tests
             Assert.IsTrue(new byte[] { 1, 0 }.LinearHash() < new byte[] { 2, 0, 255, 255, 255, 255 }.LinearHash());
             Assert.IsTrue(new byte[] { 0, 2 }.LinearHash() < new byte[] { 2, 0 }.LinearHash());
             Assert.IsTrue(new byte[] {  255, 0 }.LinearHash() > new byte[] { 0, 255 }.LinearHash());
+            Assert.IsTrue(new byte[] { 2 }.LinearHash() > new byte[] { 255 }.LinearHash());
         }
     }
 }

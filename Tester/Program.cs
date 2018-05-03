@@ -21,10 +21,68 @@ namespace Tester
                 yield return new ScalableEntity(Guid.NewGuid().ToByteArray(), value);
             }
         }
+        static void clustertests(ScalableDb db)
+        {
+            Console.Clear();
+            Console.WriteLine();
+            Console.WriteLine("Connecting to bus");
+            Console.Write("Please enter a valid host:port: ");
+            string[] ep = Console.ReadLine().Split(':');
+
+
+            using (P2PQueue q = new P2PQueue(ep[0], int.Parse(ep[1])))
+            {
+                Console.WriteLine("Connecting to bus (topic test)");
+                var subtask = q.Subscribe("test");
+                subtask.Wait();
+                if (subtask.Exception != null)
+                {
+                    throw subtask.Exception;
+                }
+                Console.WriteLine("We're on the bus!");
+                q.onMessageReceived += async msg =>
+                {
+                    Console.WriteLine(msg.From + ":" + Encoding.UTF8.GetString(msg.Message));
+                    await q.CompleteMessage(msg);
+                };
+                q.onPeerConnected += peer =>
+                {
+                    Console.WriteLine("Peer connected: " + peer);
+                };
+                while (true)
+                {
+                    var tsk = q.SendMessage("test", Encoding.UTF8.GetBytes(Console.ReadLine()));
+                    tsk.Wait();
+                    if (tsk.Exception != null)
+                    {
+                        throw tsk.Exception;
+                    }
+                }
+            }
+        }
+
+        
         static async Task prog_main()
         {
             using (ScalableDb db = new ScaledAzureDb(File.ReadAllLines("C:\\data\\config.txt").Select(m=>new AzureDatabase(m,"testabletables")).ToList().ToArray()))
             {
+                var oldcolor = Console.BackgroundColor;
+                Console.BackgroundColor = ConsoleColor.Red;
+                Console.WriteLine("WARNING: These tests may make destructive changes to your database. Never use this test suite on a production database.");
+                Console.BackgroundColor = oldcolor;
+                Console.WriteLine("Please select a test suite:");
+                Console.WriteLine("0. Database connectivity and cluster performance test");
+                Console.WriteLine("1. Writer connectivity test");
+                Console.Write("Please enter a selection: ");
+                switch (Console.ReadKey().KeyChar)
+                {
+                    case '1':
+                        //Sanity test
+                        clustertests(db);
+                        return;
+                }
+                Console.Clear();
+
                 ScalableDb mdb = db;
                 //mdb = new MemoryDb();
                 List<ScalableEntity> ents = new List<ScalableEntity>();

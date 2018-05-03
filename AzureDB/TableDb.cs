@@ -94,6 +94,7 @@ namespace AzureDB
         const char nextChar = (char)('_' + 1);
         internal Table(TableDb tdb,ScalableDb db, string table, bool useLinearHash = false)
         {
+            this.UseLinearHash = useLinearHash;
             tableName = Encoding.UTF8.GetBytes(table+"_");
             this.db = db;
             name = table;
@@ -201,10 +202,15 @@ namespace AzureDB
             });
         }
 
-
+        byte[] increment(byte[] data)
+        {
+            data[data.Length - 1]++;
+            return data;
+        }
         internal Task RangeRetrieve(byte[] start, byte[] end, TypedRetrieveCallback<TableRow> callback)
         {
-            return RetrieveDirect(GenerateKey(start), GenerateKey(end), callback);
+
+            return RetrieveDirect(start == null ? GenerateKey(new byte[0]) : GenerateKey(start), end == null ? increment(GenerateKey(new byte[0])) : GenerateKey(end), callback);
         }
 
         async Task RetrieveDirect(byte[] start, byte[] end, TypedRetrieveCallback<TableRow> callback)
@@ -239,8 +245,16 @@ namespace AzureDB
 
         public Task Retrieve(object start, object end, TypedRetrieveCallback<TableRow> callback)
         {
-            byte[] _start = start.GetType() == typeof(byte[]) ? start as byte[] : start.Serialize();
-            byte[] _end = end.GetType() == typeof(byte[]) ? end as byte[] : end.Serialize();
+            byte[] _start = null;
+            byte[] _end = null;
+            if (start != null)
+            {
+                _start = start.GetType() == typeof(byte[]) ? start as byte[] : start.Serialize();
+            }
+            if (end != null)
+            {
+                _end = end.GetType() == typeof(byte[]) ? end as byte[] : end.Serialize();
+            }
             return RangeRetrieve(_start, _end, callback);
         }
         public Task Retrieve<T>(object start, object end, TypedRetrieveCallback<T> callback) where T : class, new()

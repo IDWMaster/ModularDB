@@ -180,12 +180,13 @@ namespace AzureDB
                                     string endQuery = null;
                                     if(iable.StartRange != null)
                                     {
-                                        startQuery = TableQuery.CombineFilters(TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.GreaterThan, iable.StartRange.LinearHash().ToString()),TableOperators.And,TableQuery.GenerateFilterCondition("RowKey",QueryComparisons.GreaterThan, Uri.EscapeDataString(Convert.ToBase64String(iable.StartRange))));
+                                        startQuery = TableQuery.CombineFilters(TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.GreaterThan, new ScalableEntity(iable.StartRange, null) { UseLinearHash = true }.SetPartition(optimal_shard_size).Partition.ToString()),TableOperators.And,TableQuery.GenerateFilterCondition("RowKey",QueryComparisons.GreaterThan, Uri.EscapeDataString(Convert.ToBase64String(iable.StartRange))));
                                     }
                                     if (iable.EndRange != null)
                                     {
-                                        endQuery = TableQuery.CombineFilters(TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.LessThan, iable.EndRange.LinearHash().ToString()), TableOperators.And, TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.LessThan, Uri.EscapeDataString(Convert.ToBase64String(iable.EndRange))));
+                                        endQuery = TableQuery.CombineFilters(TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.LessThan, new ScalableEntity(iable.EndRange, null) { UseLinearHash = true }.SetPartition(optimal_shard_size).Partition.ToString()), TableOperators.And, TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.LessThan, Uri.EscapeDataString(Convert.ToBase64String(iable.EndRange))));
                                     }
+                                    //TODO: Figure out how to get partitions to match what was inserted (all elements 0 to 100 have partition key 64)
                                     query = or(new string[] {query ,and(new string[] { startQuery, endQuery }) });
                                     
 
